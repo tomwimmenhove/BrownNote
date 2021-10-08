@@ -10,6 +10,9 @@
 #include <vector>
 #include <memory>
 #include <queue>
+#include <cmath>
+
+#include "alsa.h"
 
 typedef float signalType;
 
@@ -44,6 +47,37 @@ public:
 private:
 	T start;
 };
+
+template <typename T>
+class SineSource: public DataStream<T>
+{
+public:
+	SineSource(T rate, size_t n = 1024)
+		: inc(rate * M_PI * 2), n(n), x(0)
+	{ }
+
+	size_t PushToVector(std::vector<T>& v) override
+	{
+		for(size_t i = 0; i < n; i++)
+		{
+			v.push_back(sin(x));
+			x += inc;
+
+			if (x > M_PI * 2)
+			{
+				x -= M_PI * 2;
+			}
+		}
+
+		return n;
+	}
+
+private:
+	T inc;
+	size_t n;
+	T x;
+};
+
 
 template <typename T>
 class Splitter : public DataStream<T>
@@ -119,15 +153,45 @@ private:
 	std::vector<std::shared_ptr<DataStream<T>>> dataStreams;
 };
 
-//template <typename T>
-//class DumbSink
-//{
-//public:
-//	DumbSink()
-//	{
-//
-//	}
-//};
+template <typename T>
+class AlsaMonoSink
+{
+public:
+	AlsaMonoSink(std::shared_ptr<DataStream<T>> dataStream)
+		: dataStream(dataStream), alsa(1, 48000, 500000)
+	{ }
+
+	void run()
+	{
+		while(true)
+		{
+			buf.clear();
+			dataStream->PushToVector(buf);
+
+			audio.clear();
+			audio.reserve(buf.size());
+
+			for(auto& sample: buf)
+			{
+				int x = sample * 32768.0;
+
+				/* Clip */
+				if (x > 32767) x = 32767;
+				if (x < -32768) x = -32768;
+
+				audio.push_back(x);
+			}
+
+			alsa.write(audio);
+		}
+	}
+
+private:
+	std::vector<T> buf;
+	std::vector<int16_t> audio;
+	std::shared_ptr<DataStream<T>> dataStream;
+	Alsa alsa;
+};
 
 template <typename T>
 class DataBuffer : public DataStream<T>
@@ -162,6 +226,14 @@ private:
 };
 
 int main() {
+	auto tone = std::make_shared<SineSource<signalType>>(1000.0 / 48000.0);
+	//auto tone = std::make_shared<SineSource<signalType>>(1.0 / 10.0, 7);
+
+	AlsaMonoSink<signalType> sound(tone);
+
+	sound.run();
+
+	return 0;
 	auto source1 = std::make_shared<DumbSource<signalType>>(1);
 	auto source2 = std::make_shared<DumbSource<signalType>>(1);
 	auto source3 = std::make_shared<DumbSource<signalType>>(2);
