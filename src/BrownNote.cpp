@@ -50,6 +50,31 @@ private:
 };
 
 template <typename T>
+class DcSource: public DataStream<T>
+{
+public:
+	DcSource(T dcValue, size_t n = 1024)
+		: dcValue(dcValue), n(n)
+	{ }
+
+	size_t PushToVector(std::vector<T>& v) override
+	{
+		v.reserve(v.size() + n);
+
+		for (size_t i = 0; i < n; i++)
+		{
+			v.push_back(dcValue);
+		}
+
+		return n;
+	}
+
+private:
+	T dcValue;
+	size_t n;
+};
+
+template <typename T>
 class SineSource: public DataStream<T>
 {
 public:
@@ -288,14 +313,25 @@ int main()
 	auto tone9 = std::make_shared<SineSource<signalType>>(littleError() + 250 * 3 / 48000.0, .05);
 	auto tone10 = std::make_shared<SineSource<signalType>>(littleError() + 250 / 3 / 48000.0, .15);
 
-	auto organ = std::make_shared<Mixer<signalType>>(
+	auto combinedTones = std::make_shared<Mixer<signalType>>(
 			std::initializer_list<std::shared_ptr<DataStream<signalType>>>(
 					{tone1, tone2, tone3, tone4, tone5, tone6, tone7, tone8,
 					 tone9, tone10}));
 
-	auto g = std::make_shared<Gain<signalType>>(organ, 1.0 / organ->numStreams());
+	auto one = std::make_shared<DcSource<signalType>>(1.0);
+	auto vibrato = std::make_shared<SineSource<signalType>>(4.0 / 48000.0, .05);
+	auto vibratoScaler = std::make_shared<Mixer<signalType>>(
+			std::initializer_list<std::shared_ptr<DataStream<signalType>>>(
+					{one, vibrato}));
 
-	AlsaMonoSink<signalType> sound(g);
+	auto organ = std::make_shared<Mixer<signalType>>(
+			[](const signalType a, const signalType b) { return a * b; },
+			std::initializer_list<std::shared_ptr<DataStream<signalType>>>(
+					{combinedTones, vibratoScaler}));
+
+	auto masterChannel = std::make_shared<Gain<signalType>>(organ, 1.0 / combinedTones->numStreams());
+
+	AlsaMonoSink<signalType> sound(masterChannel);
 
 	sound.run();
 
