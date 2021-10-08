@@ -294,24 +294,25 @@ double fRand(double fMin, double fMax)
     return fMin + f * (fMax - fMin);
 }
 
-double littleError()
+double littleError(double x, double scale = 50.0)
 {
-	return fRand(-5, 5) / 48000.0;
+	double max = x / scale;
+	return x + fRand(-max, max);
 }
 
 int main()
 {
-	auto tone1 = std::make_shared<SineSource<signalType>>(littleError() + 125.0 / 2 / 48000.0, 0.2);
-	auto tone2 = std::make_shared<SineSource<signalType>>(littleError() + 125.0 / 4 / 48000.0, 0.3);
-	auto tone3 = std::make_shared<SineSource<signalType>>(littleError() + 125 / 48000.0, 0.5);
-	auto tone4 = std::make_shared<SineSource<signalType>>(littleError() + 250 / 48000.0, 1.0);
-	auto tone5 = std::make_shared<SineSource<signalType>>(littleError() + 500 / 48000.0, 0.5);
-	auto tone6 = std::make_shared<SineSource<signalType>>(littleError() + 1000.0 / 48000.0, 0.3);
-	auto tone7 = std::make_shared<SineSource<signalType>>(littleError() + 2000.0 / 48000.0, 0.2);
-	auto tone8 = std::make_shared<SineSource<signalType>>(littleError() + 4000.0 / 48000.0, 0.1);
+	auto tone1 = std::make_shared<SineSource<signalType>>(littleError(125.0) / 2 / 48000.0, 0.2);
+	auto tone2 = std::make_shared<SineSource<signalType>>(littleError(125.0) / 4 / 48000.0, 0.3);
+	auto tone3 = std::make_shared<SineSource<signalType>>(littleError(125) / 48000.0, 0.5);
+	auto tone4 = std::make_shared<SineSource<signalType>>(littleError(250) / 48000.0, 1.0);
+	auto tone5 = std::make_shared<SineSource<signalType>>(littleError(500) / 48000.0, 0.5);
+	auto tone6 = std::make_shared<SineSource<signalType>>(littleError(1000.0) / 48000.0, 0.3);
+	auto tone7 = std::make_shared<SineSource<signalType>>(littleError(2000.0) / 48000.0, 0.2);
+	auto tone8 = std::make_shared<SineSource<signalType>>(littleError(4000.0) / 48000.0, 0.05);
 
-	auto tone9 = std::make_shared<SineSource<signalType>>(littleError() + 250 * 3 / 48000.0, .05);
-	auto tone10 = std::make_shared<SineSource<signalType>>(littleError() + 250 / 3 / 48000.0, .15);
+	auto tone9 = std::make_shared<SineSource<signalType>>(littleError(2500) * 3 / 48000.0, .05);
+	auto tone10 = std::make_shared<SineSource<signalType>>(littleError(250) / 3 / 48000.0, .15);
 
 	auto combinedTones = std::make_shared<Mixer<signalType>>(
 			std::initializer_list<std::shared_ptr<DataStream<signalType>>>(
@@ -319,7 +320,7 @@ int main()
 					 tone9, tone10}));
 
 	auto one = std::make_shared<DcSource<signalType>>(1.0);
-	auto vibrato = std::make_shared<SineSource<signalType>>(4.0 / 48000.0, .05);
+	auto vibrato = std::make_shared<SineSource<signalType>>(1.0 / 48000.0, .05);
 	auto vibratoScaler = std::make_shared<Mixer<signalType>>(
 			std::initializer_list<std::shared_ptr<DataStream<signalType>>>(
 					{one, vibrato}));
