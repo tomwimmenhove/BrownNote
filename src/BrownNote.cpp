@@ -17,7 +17,7 @@ template <typename T>
 class PullDataStream
 {
 public:
-	virtual std::vector<T> Pull() = 0;
+	virtual size_t PushToVector(std::vector<T>&) = 0;
 
 	virtual ~PullDataStream() { }
 };
@@ -26,9 +26,15 @@ template <typename T>
 class DumbSource: public PullDataStream<T>
 {
 public:
-	std::vector<T> Pull() override
+	size_t PushToVector(std::vector<T>& v) override
 	{
-		return std::vector<T>({ 1, 2, 3, 4, });
+		T x[] = { 1, 2, 3, 4, };
+		size_t n = sizeof(x) / sizeof(T);
+
+		v.reserve(v.size() + n);
+		copy(&x[0], &x[n], back_inserter(v));
+
+		return n;
 	}
 };
 
@@ -50,32 +56,37 @@ public:
 	: dataStream(dataStream), len(len)
 	{ }
 
-	std::vector<T> Pull() override
+	size_t PushToVector(std::vector<T>& v) override
 	{
+		v.reserve(v.size() + len);
+
 		// XXX: Replace this with a circular buffer
-		while (tmpBuf.size() < len)
+		while (tmpQueue.size() < len)
 		{
-			auto data = dataStream->Pull();
-			for(auto& x: data)
+			tmpBuf.clear();
+			dataStream->PushToVector(tmpBuf);
+
+			for(auto& x: tmpBuf)
 			{
-				tmpBuf.push(x);
+				tmpQueue.push(x);
 			}
 		}
 
 		std::vector<T> result(len);
 		for(size_t i = 0; i < len; i++)
 		{
-			result[i] = tmpBuf.front();
-			tmpBuf.pop();
+			v.push_back(tmpQueue.front());
+			tmpQueue.pop();
 		}
 
-		return result;
+		return len;
 	}
 
 private:
 	std::shared_ptr<PullDataStream<T>> dataStream;
 	size_t len;
-	std::queue<T> tmpBuf;
+	std::queue<T> tmpQueue;
+	std::vector<T> tmpBuf;
 };
 
 
@@ -114,17 +125,20 @@ int main() {
 
 	auto buf = std::make_shared<DataBuffer<signalType>>(source, 3);
 
-	auto data = buf->Pull();
-	for (auto& x: data)
-	{
-		std::cout << x << '\n';
-	}
-	data = buf->Pull();
-	for (auto& x: data)
+	std::vector<signalType> v;
+
+	buf->PushToVector(v);
+	for (auto& x: v)
 	{
 		std::cout << x << '\n';
 	}
 
+	v.clear();
+	buf->PushToVector(v);
+	for (auto& x: v)
+	{
+		std::cout << x << '\n';
+	}
 
 	std::cout << "Hi" << std::endl; // prints !!!Hello World!!!
 	return 0;
