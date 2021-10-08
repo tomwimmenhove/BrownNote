@@ -26,7 +26,7 @@ template <typename T>
 class DumbSource: public DataStream<T>
 {
 public:
-	DumbSource(T start = 1)
+	DumbSource(T start = 0)
 		: start(start)
 	{ }
 
@@ -43,6 +43,39 @@ public:
 
 private:
 	T start;
+};
+
+template <typename T>
+class Splitter : public DataStream<T>
+{
+public:
+	Splitter(std::shared_ptr<DataStream<T>> dataStream, size_t channels)
+	: dataStream(dataStream), channels(channels), channel(0)
+	{ }
+
+	size_t PushToVector(std::vector<T>& v) override
+	{
+		if (channel == 0)
+		{
+			buf.clear();
+			dataStream->PushToVector(buf);
+		}
+
+		std::copy(buf.begin(), buf.end(), std::back_inserter(v));
+
+		if (++channel >= channels)
+		{
+			channel = 0;
+		}
+
+		return buf.size();
+	}
+
+private:
+	std::vector<T> buf;
+	std::shared_ptr<DataStream<T>> dataStream;
+	size_t channels;
+	size_t channel;
 };
 
 template <typename T>
@@ -129,17 +162,17 @@ private:
 };
 
 int main() {
-	//auto source1 = std::shared_ptr<DataStream<signalType>>(new DumbSource<signalType>());
-	auto source1 = std::make_shared<DumbSource<signalType>>();
-	auto source2 = std::make_shared<DumbSource<signalType>>();
-	auto source3 = std::make_shared<DumbSource<signalType>>(10);
+	auto source1 = std::make_shared<DumbSource<signalType>>(1);
+	auto source2 = std::make_shared<DumbSource<signalType>>(1);
+	auto source3 = std::make_shared<DumbSource<signalType>>(2);
 
 	auto buf1 = std::make_shared<DataBuffer<signalType>>(source1, 5);
-	auto buf2 = std::make_shared<DataBuffer<signalType>>(source2, 5);
-	auto buf3 = std::make_shared<DataBuffer<signalType>>(source3, 5);
+	auto buf2 = std::make_shared<DataBuffer<signalType>>(source3, 5);
+
+	auto split = std::make_shared<Splitter<signalType>>(buf1, 2);
 
 	auto mix = std::make_shared<Mixer<signalType>>(
-			std::initializer_list<std::shared_ptr<DataStream<signalType>>>({buf1, buf2, buf3}));
+			std::initializer_list<std::shared_ptr<DataStream<signalType>>>({split, split, buf2}));
 
 	std::vector<signalType> v;
 	v.reserve(buf1->size());
