@@ -78,6 +78,32 @@ private:
 	T x;
 };
 
+template <typename T>
+class Gain : public DataStream<T>
+{
+public:
+	Gain(std::shared_ptr<DataStream<T>> dataStream, T gain)
+	: dataStream(dataStream), gain(gain)
+	{ }
+
+	size_t PushToVector(std::vector<T>& v) override
+	{
+		auto start = v.size();
+
+		size_t ret = dataStream->PushToVector(v);
+
+		for(auto i = start; i < v.size(); i++)
+		{
+			v[i] *= gain;
+		}
+
+		return ret;
+	}
+
+private:
+	std::shared_ptr<DataStream<T>> dataStream;
+	T gain;
+};
 
 template <typename T>
 class Splitter : public DataStream<T>
@@ -112,6 +138,47 @@ private:
 	size_t channel;
 };
 
+//template <typename T>
+//class Mixer: public DataStream<T>
+//{
+//public:
+//	Mixer(std::initializer_list<std::shared_ptr<DataStream<T>>> dataStreams)
+//		: dataStreams(dataStreams)
+//	{ }
+//
+//	size_t PushToVector(std::vector<T>& v) override
+//	{
+//		if (dataStreams.size() == 0)
+//		{
+//			v.resize(v.size() + 1024);
+//		}
+//
+//		auto start = v.end();
+//		size_t len = dataStreams[0]->PushToVector(v);
+//
+//		for(auto it = dataStreams.begin() + 1; it < dataStreams.end(); it++)
+//		{
+//			tmpBuf.clear();
+//			if ((*it)->PushToVector(tmpBuf) != len)
+//			{
+//				// Die
+//			}
+//
+//			/* Mix it */
+//			for(size_t i = 0; i < tmpBuf.size(); i++)
+//			{
+//				start[i] += tmpBuf[i];
+//			}
+//		}
+//
+//		return len;
+//	}
+//
+//private:
+//	std::vector<T> tmpBuf;
+//	std::vector<std::shared_ptr<DataStream<T>>> dataStreams;
+//};
+
 template <typename T>
 class Mixer: public DataStream<T>
 {
@@ -127,7 +194,8 @@ public:
 			v.resize(v.size() + 1024);
 		}
 
-		auto start = v.end();
+		//auto start = v.end();
+		auto start = v.size();
 		size_t len = dataStreams[0]->PushToVector(v);
 
 		for(auto it = dataStreams.begin() + 1; it < dataStreams.end(); it++)
@@ -141,7 +209,8 @@ public:
 			/* Mix it */
 			for(size_t i = 0; i < tmpBuf.size(); i++)
 			{
-				start[i] += tmpBuf[i];
+				//start[i] += tmpBuf[i];
+				v[start + i] += tmpBuf[i];
 			}
 		}
 
@@ -226,10 +295,18 @@ private:
 };
 
 int main() {
-	auto tone = std::make_shared<SineSource<signalType>>(1000.0 / 48000.0);
-	//auto tone = std::make_shared<SineSource<signalType>>(1.0 / 10.0, 7);
+	auto tone1 = std::make_shared<SineSource<signalType>>(125 / 48000.0);
+	auto tone2 = std::make_shared<SineSource<signalType>>(250 / 48000.0);
+	auto tone3 = std::make_shared<SineSource<signalType>>(500 / 48000.0);
+	auto tone4 = std::make_shared<SineSource<signalType>>(1000.0 / 48000.0);
 
-	AlsaMonoSink<signalType> sound(tone);
+	auto organ = std::make_shared<Mixer<signalType>>(
+			std::initializer_list<std::shared_ptr<DataStream<signalType>>>(
+					{tone1, tone2, tone3, tone4}));
+
+	auto g = std::make_shared<Gain<signalType>>(organ, 1.0 / 4);
+
+	AlsaMonoSink<signalType> sound(g);
 
 	sound.run();
 
