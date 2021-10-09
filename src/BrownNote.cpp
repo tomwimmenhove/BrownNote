@@ -123,11 +123,25 @@ private:
 };
 
 template <typename T>
-class Gain : public DataStream<T>
+class GainTransformer
 {
 public:
-	Gain(std::shared_ptr<DataStream<T>> dataStream, T gain)
-	: dataStream(dataStream), gain(gain)
+	GainTransformer(T gain)
+		: gain(gain)
+	{ }
+
+	T operator()(const T& x) const { return x * gain; }
+
+private:
+	T gain;
+};
+
+template <typename T, typename U>
+class Transformer : public DataStream<T>
+{
+public:
+	Transformer(std::shared_ptr<DataStream<T>> dataStream, U transformer)
+	: dataStream(dataStream), transformer(transformer)
 	{ }
 
 	std::vector<T>& getData() override
@@ -136,8 +150,7 @@ public:
 
 		buf.resize(data.size());
 
-		std::transform(data.begin(), data.end(), buf.begin(),
-				std::bind(std::multiplies<T>(), std::placeholders::_1, gain));
+		std::transform(data.begin(), data.end(), buf.begin(), transformer);
 
 		return buf;
 	}
@@ -145,9 +158,19 @@ public:
 private:
 	std::vector<T> buf;
 	std::shared_ptr<DataStream<T>> dataStream;
-	T gain;
+	GainTransformer<T> transformer;
 };
 
+template <typename T>
+class Gain : public Transformer<T, GainTransformer<T>>
+{
+public:
+	Gain(std::shared_ptr<DataStream<T>> dataStream, T gain)
+	//auto masterChannel = std::make_shared<Transformer<signalType, GainTransformer<signalType>>>(combinedTones, GainTransformer<signalType>(.1));
+	//GainTransformer<signalType>>>(combinedTones, GainTransformer<signalType>(.1)
+	: Transformer<T, GainTransformer<T>>(dataStream, GainTransformer<signalType>(gain))
+	{ }
+};
 
 template <typename T, typename U>
 class Combiner : public DataStream<T>
@@ -357,6 +380,9 @@ int main()
 //
 //	auto masterChannel = std::make_shared<Gain<signalType>>(organ, 1.0 / combinedTones->numStreams());
 
+	//GainTransformer<signalType> g(.1);
+
+	//auto masterChannel = std::make_shared<Transformer<signalType, GainTransformer<signalType>>>(combinedTones, GainTransformer<signalType>(.1));
 	auto masterChannel = std::make_shared<Gain<signalType>>(combinedTones, 1.0 / combinedTones->numStreams());
 
 	AlsaMonoSink<signalType> sound(masterChannel);
