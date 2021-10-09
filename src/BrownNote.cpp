@@ -95,7 +95,7 @@ class Splitter : public DataStream<T>
 {
 public:
 	Splitter(std::shared_ptr<DataStream<T>> dataStream, size_t channels)
-	: dataStream(dataStream), channels(channels), channel(0)
+		: dataStream(dataStream), channels(channels), channel(0)
 	{ }
 
 	std::vector<T>& getData() override
@@ -123,25 +123,11 @@ private:
 };
 
 template <typename T>
-class GainTransformer
-{
-public:
-	GainTransformer(T gain)
-		: gain(gain)
-	{ }
-
-	T operator()(const T& x) const { return x * gain; }
-
-private:
-	T gain;
-};
-
-template <typename T, typename U>
 class Transformer : public DataStream<T>
 {
 public:
-	Transformer(std::shared_ptr<DataStream<T>> dataStream, U transformer)
-	: dataStream(dataStream), transformer(transformer)
+	Transformer(std::shared_ptr<DataStream<T>> dataStream)
+		: dataStream(dataStream)
 	{ }
 
 	std::vector<T>& getData() override
@@ -150,34 +136,63 @@ public:
 
 		buf.resize(data.size());
 
-		std::transform(data.begin(), data.end(), buf.begin(), transformer);
+		std::transform(data.begin(), data.end(), buf.begin(),
+				std::bind(&Transformer::transform, this, std::placeholders::_1));
 
 		return buf;
 	}
 
+protected:
+	virtual T transform(const T& x) = 0;
+
 private:
 	std::vector<T> buf;
 	std::shared_ptr<DataStream<T>> dataStream;
-	GainTransformer<T> transformer;
 };
 
 template <typename T>
-class Gain : public Transformer<T, GainTransformer<T>>
+class Gain : public Transformer<T>
 {
 public:
 	Gain(std::shared_ptr<DataStream<T>> dataStream, T gain)
-	//auto masterChannel = std::make_shared<Transformer<signalType, GainTransformer<signalType>>>(combinedTones, GainTransformer<signalType>(.1));
-	//GainTransformer<signalType>>>(combinedTones, GainTransformer<signalType>(.1)
-	: Transformer<T, GainTransformer<T>>(dataStream, GainTransformer<signalType>(gain))
+		: Transformer<T>(dataStream), gain(gain)
 	{ }
+
+	void setGain(const T& gain) { this->gain = gain; }
+	T getGain(const T& gain) const { return gain; }
+
+protected:
+	T transform(const T& x) override { return gain * x; }
+
+private:
+	T gain;
+};
+
+template <typename T>
+class Adder : public Transformer<T>
+{
+public:
+	Adder(std::shared_ptr<DataStream<T>> dataStream, T offset)
+		: Transformer<T>(dataStream), offset(offset)
+	{ }
+
+	void setOffset(const T& offset) { this->offset = offset; }
+	T getOffset(const T& offset) const { return offset; }
+
+protected:
+	T transform(const T& x) override { return offset + x; }
+
+private:
+	T offset;
 };
 
 template <typename T, typename U>
 class Combiner : public DataStream<T>
 {
 public:
-	Combiner(std::initializer_list<std::shared_ptr<DataStream<T>>> dataStreams)
-		: dataStreams(dataStreams)
+	Combiner(std::initializer_list<std::shared_ptr<DataStream<T>>> dataStreams,
+			U combiner = U())
+		: dataStreams(dataStreams), combiner(combiner)
 	{ }
 
 	std::vector<T>& getData() override
@@ -288,7 +303,6 @@ public:
 		buf.clear();
 		buf.insert(buf.begin(), tmpBuf.begin(), tmpBuf.begin() + len);
 
-		//std::copy(tmpBuf.begin(), tmpBuf.begin() + len, back_inserter(buf));
 		tmpBuf.erase(tmpBuf.begin(), tmpBuf.begin() + len);
 
 		return buf;
@@ -319,38 +333,17 @@ std::shared_ptr<DataStream<signalType>> shittyTone(double freq, signalType ampli
 		double vibrFreq, signalType vibrAmplitude)
 {
 	auto tone = std::make_shared<SineSource<signalType>>(littleError(freq) / 48000.0, amplitude);
-
-	auto one = std::make_shared<DcSource<signalType>>(1.0);
 	auto vibrato = std::make_shared<SineSource<signalType>>(vibrFreq / 48000.0, vibrAmplitude);
-	auto vibratoScaler = std::make_shared<Mixer<signalType>>(
-			std::initializer_list<std::shared_ptr<DataStream<signalType>>>(
-					{one, vibrato}));
+	auto vibratoScaler = std::make_shared<Adder<signalType>>(vibrato, 1.0);
 
 	return std::make_shared<Modulator<signalType>>(
 			std::initializer_list<std::shared_ptr<DataStream<signalType>>>(
 					{tone, vibratoScaler}));
 }
-#if 0
-int main()
-{
-	return 0;
-}
-#else
+
 int main()
 {
 #if 1
-//	auto tone1 = std::make_shared<SineSource<signalType>>(littleError(125.0) / 2 / 48000.0, 0.2);
-//	auto tone2 = std::make_shared<SineSource<signalType>>(littleError(125.0) / 4 / 48000.0, 0.3);
-//	auto tone3 = std::make_shared<SineSource<signalType>>(littleError(125) / 48000.0, 0.5);
-//	auto tone4 = std::make_shared<SineSource<signalType>>(littleError(250) / 48000.0, 1.0);
-//	auto tone5 = std::make_shared<SineSource<signalType>>(littleError(500) / 48000.0, 0.5);
-//	auto tone6 = std::make_shared<SineSource<signalType>>(littleError(1000.0) / 48000.0, 0.3);
-//	auto tone7 = std::make_shared<SineSource<signalType>>(littleError(2000.0) / 48000.0, 0.2);
-//	auto tone8 = std::make_shared<SineSource<signalType>>(littleError(4000.0) / 48000.0, 0.05);
-//
-//	auto tone9 = std::make_shared<SineSource<signalType>>(littleError(2500) * 3 / 48000.0, .05);
-//	auto tone10 = std::make_shared<SineSource<signalType>>(littleError(250) / 3 / 48000.0, .15);
-
 	auto tone1 = shittyTone(125.0 / 2, 0.2, .1, 0.2);
 	auto tone2 = shittyTone(125.0 / 4, 0.3, .3, 0.2);
 	auto tone3 = shittyTone(125, 0.5, .5, 0.2);
@@ -367,29 +360,9 @@ int main()
 					{tone1, tone2, tone3, tone4, tone5, tone6, tone7,
 					 tone9, tone10}));
 
-//	auto one = std::make_shared<DcSource<signalType>>(1.0);
-//	auto vibrato = std::make_shared<SineSource<signalType>>(1.0 / 48000.0, .05);
-//	auto vibratoScaler = std::make_shared<Mixer<signalType>>(
-//			std::initializer_list<std::shared_ptr<DataStream<signalType>>>(
-//					{one, vibrato}));
-//
-//	auto organ = std::make_shared<Mixer<signalType>>(
-//			[](const signalType a, const signalType b) { return a * b; },
-//			std::initializer_list<std::shared_ptr<DataStream<signalType>>>(
-//					{combinedTones, vibratoScaler}));
-//
-//	auto masterChannel = std::make_shared<Gain<signalType>>(organ, 1.0 / combinedTones->numStreams());
-
-	//GainTransformer<signalType> g(.1);
-
-	//auto masterChannel = std::make_shared<Transformer<signalType, GainTransformer<signalType>>>(combinedTones, GainTransformer<signalType>(.1));
 	auto masterChannel = std::make_shared<Gain<signalType>>(combinedTones, 1.0 / combinedTones->numStreams());
 
 	AlsaMonoSink<signalType> sound(masterChannel);
-//
-//	auto beep = std::make_shared<SineSource<signalType>>(1000.0 / 48000.0, 1.0);
-//	auto g = std::make_shared<Gain<signalType>>(beep, 1.0);
-//	AlsaMonoSink<signalType> sound(g);
 
 	sound.run();
 
@@ -425,4 +398,3 @@ int main()
 
 	return 0;
 }
-#endif
