@@ -148,18 +148,12 @@ private:
 	size_t channel;
 };
 
-template <typename T>
-class Mixer : public DataStream<T>
+template <typename T, typename U>
+class Combiner : public DataStream<T>
 {
 public:
-	Mixer(std::initializer_list<std::shared_ptr<DataStream<T>>> dataStreams)
-		: dataStreams(dataStreams),
-		  combiner([](const signalType a, const signalType b) { return a + b; })
-	{ }
-
-	Mixer(std::function<T(T, T)> combiner,
-			std::initializer_list<std::shared_ptr<DataStream<T>>> dataStreams)
-		: dataStreams(dataStreams), combiner(combiner)
+	Combiner(std::initializer_list<std::shared_ptr<DataStream<T>>> dataStreams)
+		: dataStreams(dataStreams)
 	{ }
 
 	std::vector<T>& getData() override
@@ -189,7 +183,6 @@ public:
 			for(size_t i = 0; i < buf.size(); i++)
 			{
 				buf[i] = combiner(buf[i], data[i]);
-				//buf[i] += data[i];
 			}
 		}
 
@@ -201,7 +194,31 @@ public:
 private:
 	std::vector<T> buf;
 	std::vector<std::shared_ptr<DataStream<T>>> dataStreams;
-	std::function<T(T, T)> combiner;
+	U combiner;
+};
+
+template <typename T>
+struct MixCombiner
+{
+	T operator()(T a, T b) const { return a + b; }
+};
+
+template <typename T>
+struct ModulateCombiner
+{
+	T operator()(T a, T b) const { return a * b; }
+};
+
+template <typename T>
+struct Mixer : public Combiner<T, MixCombiner<T>>
+{
+	using Combiner<T, MixCombiner<T>>::Combiner;
+};
+
+template <typename T>
+struct Modulator : public Combiner<T, ModulateCombiner<T>>
+{
+	using Combiner<T, ModulateCombiner<T>>::Combiner;
 };
 
 template <typename T>
@@ -300,10 +317,9 @@ std::shared_ptr<DataStream<signalType>> shittyTone(double freq, signalType ampli
 			std::initializer_list<std::shared_ptr<DataStream<signalType>>>(
 					{one, vibrato}));
 
-	return std::make_shared<Mixer<signalType>>(
-				[](const signalType a, const signalType b) { return a * b; },
-				std::initializer_list<std::shared_ptr<DataStream<signalType>>>(
-						{tone, vibratoScaler}));
+	return std::make_shared<Modulator<signalType>>(
+			std::initializer_list<std::shared_ptr<DataStream<signalType>>>(
+					{tone, vibratoScaler}));
 }
 #if 0
 int main()
