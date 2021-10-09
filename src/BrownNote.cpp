@@ -91,6 +91,38 @@ private:
 };
 
 template <typename T>
+class Splitter : public DataStream<T>
+{
+public:
+	Splitter(std::shared_ptr<DataStream<T>> dataStream, size_t channels)
+	: dataStream(dataStream), channels(channels), channel(0)
+	{ }
+
+	std::vector<T>& getData() override
+	{
+		if (channel == 0)
+		{
+			buf.clear();
+			auto& data = dataStream->getData();
+			buf.insert(buf.end(), data.begin(), data.end());
+		}
+
+		if (++channel >= channels)
+		{
+			channel = 0;
+		}
+
+		return buf;
+	}
+
+private:
+	std::vector<T> buf;
+	std::shared_ptr<DataStream<T>> dataStream;
+	size_t channels;
+	size_t channel;
+};
+
+template <typename T>
 class Gain : public DataStream<T>
 {
 public:
@@ -116,37 +148,6 @@ private:
 	T gain;
 };
 
-template <typename T>
-class Splitter : public DataStream<T>
-{
-public:
-	Splitter(std::shared_ptr<DataStream<T>> dataStream, size_t channels)
-	: dataStream(dataStream), channels(channels), channel(0)
-	{ }
-
-	std::vector<T>& getData() override
-	{
-		if (channel == 0)
-		{
-			buf.clear();
-			auto& data = dataStream->getData();
-			std::copy(data.begin(), data.end(), back_inserter(buf));
-		}
-
-		if (++channel >= channels)
-		{
-			channel = 0;
-		}
-
-		return buf;
-	}
-
-private:
-	std::vector<T> buf;
-	std::shared_ptr<DataStream<T>> dataStream;
-	size_t channels;
-	size_t channel;
-};
 
 template <typename T, typename U>
 class Combiner : public DataStream<T>
@@ -168,7 +169,7 @@ public:
 		}
 
 		auto& data0 = dataStreams[0]->getData();
-		std::copy(data0.begin(), data0.end(), back_inserter(buf));
+		buf.insert(buf.end(), data0.begin(), data0.end());
 
 		for(auto it = dataStreams.begin() + 1; it < dataStreams.end(); it++)
 		{
@@ -179,11 +180,8 @@ public:
 				return buf;
 			}
 
-			/* Mix it */
-			for(size_t i = 0; i < buf.size(); i++)
-			{
-				buf[i] = combiner(buf[i], data[i]);
-			}
+			std::transform(data.begin(), data.end(), buf.begin(),
+					buf.begin(), combiner);
 		}
 
 		return buf;
@@ -198,27 +196,15 @@ private:
 };
 
 template <typename T>
-struct MixCombiner
+struct Mixer : public Combiner<T, std::plus<T>>
 {
-	T operator()(T a, T b) const { return a + b; }
+	using Combiner<T, std::plus<T>>::Combiner;
 };
 
 template <typename T>
-struct ModulateCombiner
+struct Modulator : public Combiner<T, std::multiplies<T>>
 {
-	T operator()(T a, T b) const { return a * b; }
-};
-
-template <typename T>
-struct Mixer : public Combiner<T, MixCombiner<T>>
-{
-	using Combiner<T, MixCombiner<T>>::Combiner;
-};
-
-template <typename T>
-struct Modulator : public Combiner<T, ModulateCombiner<T>>
-{
-	using Combiner<T, ModulateCombiner<T>>::Combiner;
+	using Combiner<T, std::multiplies<T>>::Combiner;
 };
 
 template <typename T>
