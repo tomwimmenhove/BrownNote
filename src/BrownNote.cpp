@@ -296,6 +296,44 @@ private:
 };
 
 template <typename T>
+class AlsaStereoSink
+{
+public:
+	AlsaStereoSink(std::shared_ptr<DataStream<T>> dataStreamLeft,
+			std::shared_ptr<DataStream<T>> dataStreamRight)
+		: dataStreamLeft(dataStreamLeft), dataStreamRight(dataStreamRight),
+		  alsa(2, 48000, 500000)
+	{ }
+
+	void run()
+	{
+		auto& dataLeft = dataStreamLeft->getData();
+		auto& dataRight = dataStreamRight->getData();
+
+		if (dataLeft.size() != dataRight.size())
+		{
+			std::cerr << "Size mismatch!\n";
+			return;
+		}
+
+		buf.clear();
+		for (size_t i = 0; i < dataLeft.size(); i++)
+		{
+			buf.push_back(dataLeft[i]);
+			buf.push_back(dataRight[i]);
+		}
+
+		alsa.write(buf);
+	}
+
+private:
+	std::vector<T> buf;
+	std::shared_ptr<DataStream<T>> dataStreamLeft;
+	std::shared_ptr<DataStream<T>> dataStreamRight;
+	Alsa<T> alsa;
+};
+
+template <typename T>
 class DataBuffer : public DataStream<T>
 {
 public:
@@ -372,11 +410,12 @@ int main()
 	auto combinedTones = std::make_shared<Mixer<signalType>>(
 			std::initializer_list<std::shared_ptr<DataStream<signalType>>>(
 					{tone1, tone2, tone3, tone4, tone5, tone6, tone7,
-					 tone9, tone10, hisssss}));
+					 tone9, tone10}));
 
 	auto masterChannel = std::make_shared<Gain<signalType>>(combinedTones, 1.0 / combinedTones->numStreams());
 
-	AlsaMonoSink<signalType> sound(masterChannel);
+	//AlsaMonoSink<signalType> sound(masterChannel);
+	AlsaStereoSink<signalType> sound(masterChannel, hisssss);
 
 	while (true)
 	{

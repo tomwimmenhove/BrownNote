@@ -38,7 +38,8 @@ public:
 
 	void write(std::vector<T>& data)
 	{
-		snd_pcm_sframes_t frames = snd_pcm_writei(handle, data.data(), data.size());
+		snd_pcm_sframes_t sendFrames = (snd_pcm_sframes_t) data.size() / channels;
+		snd_pcm_sframes_t frames = snd_pcm_writei(handle, data.data(), sendFrames);
 		if (frames < 0)
 		{
 			frames = snd_pcm_recover(handle, frames, 0);
@@ -47,9 +48,9 @@ public:
 		{
 			std::cerr << "snd_pcm_writei failed" << snd_strerror(frames) << '\n';
 		}
-		if (frames > 0 && frames < (snd_pcm_sframes_t) data.size())
+		if (frames > 0 && frames < (snd_pcm_sframes_t) sendFrames)
 		{
-			std::cerr << "Short write (expected " << data.size() << ", wrote " << frames << ")\n";
+			std::cerr << "Short write (expected " << sendFrames << ", wrote " << frames << ")\n";
 		}
 	}
 
