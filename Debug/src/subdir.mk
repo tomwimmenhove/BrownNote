@@ -4,16 +4,13 @@
 
 # Add inputs and outputs from these tool invocations to the build variables 
 CPP_SRCS += \
-../src/BrownNote.cpp \
-../src/alsa.cpp 
+../src/BrownNote.cpp 
 
 OBJS += \
-./src/BrownNote.o \
-./src/alsa.o 
+./src/BrownNote.o 
 
 CPP_DEPS += \
-./src/BrownNote.d \
-./src/alsa.d 
+./src/BrownNote.d 
 
 
 # Each subdirectory must supply rules for building sources it contributes

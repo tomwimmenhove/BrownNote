@@ -13,6 +13,7 @@
 #include <memory>
 #include <queue>
 #include <cmath>
+#include <system_error>
 
 #include "alsa.h"
 
@@ -250,37 +251,18 @@ class AlsaMonoSink
 {
 public:
 	AlsaMonoSink(std::shared_ptr<DataStream<T>> dataStream)
-		: dataStream(dataStream), alsa(1, 48000, 500000)
+		: dataStream(dataStream),
+		  alsa(1, 48000, 500000)
 	{ }
 
 	void run()
 	{
-		while(true)
-		{
-			auto& data = dataStream->getData();
-
-			audio.clear();
-			audio.reserve(data.size());
-
-			for(auto& sample: data)
-			{
-				int x = sample * 32768.0;
-
-				/* Clip */
-				if (x > 32767) x = 32767;
-				if (x < -32768) x = -32768;
-
-				audio.push_back(x);
-			}
-
-			alsa.write(audio);
-		}
+		alsa.write(dataStream->getData());
 	}
 
 private:
-	std::vector<int16_t> audio;
 	std::shared_ptr<DataStream<T>> dataStream;
-	Alsa alsa;
+	Alsa<T> alsa;
 };
 
 template <typename T>
@@ -364,7 +346,10 @@ int main()
 
 	AlsaMonoSink<signalType> sound(masterChannel);
 
-	sound.run();
+	while (true)
+	{
+		sound.run();
+	}
 
 	return 0;
 #endif
