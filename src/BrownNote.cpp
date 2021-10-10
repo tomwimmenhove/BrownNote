@@ -14,6 +14,7 @@
 #include <queue>
 #include <cmath>
 #include <system_error>
+#include <random>
 
 #include "alsa.h"
 
@@ -89,6 +90,35 @@ private:
 	T amplitude;
 	std::vector<T> buf;
 	T x;
+};
+
+template <typename T>
+class NoiseSource: public DataStream<T>
+{
+public:
+	NoiseSource(T amplitude = 1.0, size_t n = 1024)
+		: amplitude(amplitude),  buf(n)
+	{
+		std::random_device rd;
+	    rnd = std::default_random_engine(rd());
+	    distr = std::uniform_real_distribution<T>(-amplitude, amplitude);
+	}
+
+	std::vector<T>& getData() override
+	{
+		for(size_t i = 0; i < buf.size(); i++)
+		{
+			buf[i] = distr(rnd);
+		}
+
+		return buf;
+	}
+
+private:
+	T amplitude;
+	std::vector<T> buf;
+	std::uniform_real_distribution<T> distr;
+	std::default_random_engine rnd;
 };
 
 template <typename T>
@@ -337,10 +367,12 @@ int main()
 	auto tone9 = shittyTone(2500 * 3, .05, 5, 0.2);
 	auto tone10 = shittyTone(250 / 3, .15, 5, 0.2);
 
+	auto hisssss =  std::make_shared<NoiseSource<signalType>>(1.0);
+
 	auto combinedTones = std::make_shared<Mixer<signalType>>(
 			std::initializer_list<std::shared_ptr<DataStream<signalType>>>(
 					{tone1, tone2, tone3, tone4, tone5, tone6, tone7,
-					 tone9, tone10}));
+					 tone9, tone10, hisssss}));
 
 	auto masterChannel = std::make_shared<Gain<signalType>>(combinedTones, 1.0 / combinedTones->numStreams());
 
