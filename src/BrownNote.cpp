@@ -154,6 +154,42 @@ private:
 };
 
 template <typename T>
+class Chopper : public DataStream<T>
+{
+public:
+	Chopper(std::shared_ptr<DataStream<T>> dataStream, double onTime, double offTime)
+		: dataStream(dataStream), t(0), onTime(onTime), period(onTime + offTime)
+	{ }
+
+	std::vector<T>& getData() override
+	{
+		auto& data = dataStream->getData();
+
+		buf.clear();
+		for(auto& x: data)
+		{
+			buf.push_back(t <= onTime ? x : 0);
+
+			t++;
+
+			if (t > period)
+			{
+				t -= period;
+			}
+		}
+
+		return buf;
+	}
+
+private:
+	std::vector<T> buf;
+	std::shared_ptr<DataStream<T>> dataStream;
+	double t;
+	double onTime;
+	double period;
+};
+
+template <typename T>
 class Transformer : public DataStream<T>
 {
 public:
@@ -415,7 +451,9 @@ int main()
 	auto masterChannel = std::make_shared<Gain<signalType>>(combinedTones, 1.0 / combinedTones->numStreams());
 
 	//AlsaMonoSink<signalType> sound(masterChannel);
-	AlsaStereoSink<signalType> sound(masterChannel, hisssss);
+
+	auto clap = std::make_shared<Chopper<signalType>>(hisssss, 48000.0 / 100.0, 48000.0 / 100.0);
+	AlsaStereoSink<signalType> sound(masterChannel, clap);
 
 	while (true)
 	{
