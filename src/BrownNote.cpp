@@ -53,7 +53,7 @@ template <typename T>
 class DataStream
 {
 public:
-	virtual std::vector<T>& getData(bool reset = true) = 0;
+	virtual std::vector<T>& getData() = 0;
 
 	virtual ~DataStream() { }
 };
@@ -66,7 +66,7 @@ public:
 		: buffer(values)
 	{ }
 
-	std::vector<T>& getData(bool reset = true) override
+	std::vector<T>& getData() override
 	{
 		return buffer;
 	}
@@ -83,7 +83,7 @@ public:
 		: dcValue(dcValue), buffer(n, dcValue)
 	{ }
 
-	std::vector<T>& getData(bool reset = true) override { return buffer; }
+	std::vector<T>& getData() override { return buffer; }
 
 private:
 	T dcValue;
@@ -99,7 +99,7 @@ public:
 	: it(it), buf(n), space(space), n(n)
 	{ }
 
-	std::vector<T>& getData(bool reset = true) override
+	std::vector<T>& getData() override
 	{
 		for(size_t i = 0; i < buf.size(); i++)
 		{
@@ -117,52 +117,6 @@ private:
 	size_t n;
 };
 
-
-template <typename T>
-class FileInt16Source: public DataStream<T>
-{
-public:
-	FileInt16Source(std::string fileName, size_t n = 1024)
-		: ioBuf(n * 2)
-	{
-		file = std::ifstream(fileName);
-	}
-
-	std::vector<T>& getData(bool reset = true) override
-	{
-		size_t byteSize = ioBuf.size() * sizeof(int16_t);
-
-		file.read((char*) ioBuf.data(), byteSize);
-
-		if (reset)
-		{
-			bufLeft.clear();
-			bufRight.clear();
-		}
-
-		for (size_t i = 0; i < ioBuf.size(); i++)
-		{
-			T x = ioBuf[i] / 32768.0;
-			if ((i & 1) == 0)
-			{
-				bufLeft.push_back(x);
-			}
-			else
-			{
-				bufRight.push_back(x);
-			}
-		}
-
-		return reset ? bufLeft : bufRight;
-	}
-
-private:
-	std::vector<int16_t> ioBuf;
-	std::vector<T> bufLeft;
-	std::vector<T> bufRight;
-	std::ifstream file;
-};
-
 template <typename T>
 class SineSource: public DataStream<T>
 {
@@ -171,7 +125,7 @@ public:
 		: inc(rate * M_PI * 2), amplitude(amplitude),  buf(n), x(0)
 	{ }
 
-	std::vector<T>& getData(bool reset = true) override
+	std::vector<T>& getData() override
 	{
 		for(size_t i = 0; i < buf.size(); i++)
 		{
@@ -206,7 +160,7 @@ public:
 	    distr = std::uniform_real_distribution<T>(-amplitude, amplitude);
 	}
 
-	std::vector<T>& getData(bool reset = true) override
+	std::vector<T>& getData() override
 	{
 		for(size_t i = 0; i < buf.size(); i++)
 		{
@@ -231,7 +185,7 @@ public:
 		: dataStream(dataStream), channels(channels), channel(0)
 	{ }
 
-	std::vector<T>& getData(bool reset = true) override
+	std::vector<T>& getData() override
 	{
 		if (channel == 0)
 		{
@@ -262,7 +216,7 @@ public:
 		: dataStream(dataStream), t(0), onTime(onTime), period(onTime + offTime)
 	{ }
 
-	std::vector<T>& getData(bool reset = true) override
+	std::vector<T>& getData() override
 	{
 		auto& data = dataStream->getData();
 
@@ -298,7 +252,7 @@ public:
 		: dataStream(dataStream)
 	{ }
 
-	std::vector<T>& getData(bool reset = true) override
+	std::vector<T>& getData() override
 	{
 		auto& data = dataStream->getData();
 
@@ -363,7 +317,7 @@ public:
 		: dataStream(dataStream), coefficients(coefficients), first(true)
 	{ }
 
-	std::vector<T>& getData(bool reset = true) override
+	std::vector<T>& getData() override
 	{
 		auto& data = dataStream->getData();
 
@@ -414,7 +368,7 @@ public:
 		: dataStreams(dataStreams), combiner(combiner)
 	{ }
 
-	std::vector<T>& getData(bool reset = true) override
+	std::vector<T>& getData() override
 	{
 		buf.clear();
 
@@ -529,15 +483,13 @@ public:
 	: dataStream(dataStream), buf(len), len(len)
 	{ }
 
-	std::vector<T>& getData(bool reset = true) override
+	std::vector<T>& getData() override
 	{
 		// XXX: Replace this with a circular buffer
 		while (tmpBuf.size() < buf.size())
 		{
-			auto& data = dataStream->getData(reset);
+			auto& data = dataStream->getData();
 			tmpBuf.insert(tmpBuf.end(), data.begin(), data.end());
-
-			reset = false;
 		}
 
 		buf.clear();
@@ -634,22 +586,7 @@ int main()
 
 	//auto fir = std::make_shared<FirFilter<signalType>>(hisssss, coeffs);
 
-	//auto stdinSource = std::make_shared<StdinInt16Source<signalType>>();
-	auto fileSource = std::make_shared<FileInt16Source<signalType>>("/home/tom/git/BrownNote/file.raw");
-
-//    std::ifstream file("/home/tom/git/BrownNote/file.raw", std::ios::binary);
-//
-//    file.seekg(0, std::ios::end);
-//    size_t fileSize = file.tellg();
-//    file.seekg(0, std::ios::beg);
-//
-//    std::vector<int16_t> vec;
-//	vec.resize(fileSize / sizeof(int16_t));
-//
-//	file.read((char *) vec.data(), fileSize);
-
 	auto fileVector = readFileIntoVector<signalType>("/home/tom/git/BrownNote/file.raw");
-
 
 	auto stdinSourceLeft  = std::make_shared<InterleavedVectorSource<signalType>>(fileVector.begin() + 0, 2);
 	auto stdinSourceRight = std::make_shared<InterleavedVectorSource<signalType>>(fileVector.begin() + 1, 2);
