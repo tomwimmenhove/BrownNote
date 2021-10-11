@@ -29,7 +29,7 @@ template <typename T>
 class DataStream
 {
 public:
-	virtual std::vector<T>& getData(int channel = 0) = 0;
+	virtual std::vector<T>& getData(int channel) = 0;
 
 	virtual ~DataStream() { }
 };
@@ -42,7 +42,7 @@ public:
 		: buffer(values)
 	{ }
 
-	std::vector<T>& getData(int channel = 0) override
+	std::vector<T>& getData(int channel) override
 	{
 		return buffer;
 	}
@@ -59,7 +59,7 @@ public:
 		: dcValue(dcValue), buffer(n, dcValue)
 	{ }
 
-	std::vector<T>& getData(int channel = 0) override { return buffer; }
+	std::vector<T>& getData(int channel) override { return buffer; }
 
 private:
 	T dcValue;
@@ -75,7 +75,7 @@ public:
 	: it(it), buf(n), space(space), n(n)
 	{ }
 
-	std::vector<T>& getData(int channel = 0) override
+	std::vector<T>& getData(int channel) override
 	{
 		for(size_t i = 0; i < buf.size(); i++)
 		{
@@ -101,7 +101,7 @@ public:
 		: inc(rate * M_PI * 2), amplitude(amplitude),  buf(n), x(0)
 	{ }
 
-	std::vector<T>& getData(int channel = 0) override
+	std::vector<T>& getData(int channel) override
 	{
 		for(size_t i = 0; i < buf.size(); i++)
 		{
@@ -136,7 +136,7 @@ public:
 	    distr = std::uniform_real_distribution<T>(-amplitude, amplitude);
 	}
 
-	std::vector<T>& getData(int channel = 0) override
+	std::vector<T>& getData(int channel) override
 	{
 		for(size_t i = 0; i < buf.size(); i++)
 		{
@@ -161,7 +161,7 @@ public:
 		: c(start), buf(n)
 	{ }
 
-	std::vector<T>& getData(int channel = 0) override
+	std::vector<T>& getData(int channel) override
 	{
 		for(size_t i = 0; i < buf.size(); i++)
 		{
@@ -180,16 +180,16 @@ template <typename T>
 class DataDuplicator : public DataStream<T>
 {
 public:
-	DataDuplicator(std::shared_ptr<DataStream<T>> dataStream, int channels)
-		: dataStream(dataStream), channels(channels), channel(0)
+	DataDuplicator(std::shared_ptr<DataStream<T>> dataStream, int streamChannel, int channels)
+		: dataStream(dataStream), streamChannel(streamChannel), channels(channels), curChannel(0)
 	{ }
 
-	std::vector<T>& getData(int channel = 0) override
+	std::vector<T>& getData(int channel) override
 	{
 		if (channel == 0)
 		{
 			buf.clear();
-			auto& data = dataStream->getData();
+			auto& data = dataStream->getData(streamChannel);
 			buf.insert(buf.end(), data.begin(), data.end());
 		}
 
@@ -202,16 +202,18 @@ public:
 private:
 	std::vector<T> buf;
 	std::shared_ptr<DataStream<T>> dataStream;
+	int streamChannel;
 	int channels;
-	int channel;
+	int curChannel;
 };
 
 template <typename T>
 class Splitter : public DataStream<T>
 {
 public:
-	Splitter(std::shared_ptr<DataStream<T>> dataStream, int channels)
-		: dataStream(dataStream), channels(channels), channel(0), numGets(0)
+	Splitter(std::shared_ptr<DataStream<T>> dataStream, int streamChannel, int channels)
+		: dataStream(dataStream), streamChannel(streamChannel),
+		  channels(channels), channel(0), numGets(0)
 	{
 		for (int i = 0; i < channels; i++)
 		{
@@ -219,7 +221,7 @@ public:
 		}
 	}
 
-	std::vector<T>& getData(int channel = 0) override
+	std::vector<T>& getData(int channel) override
 	{
 		size_t min = (*min_element(channelMap.begin(), channelMap.end(),
 		    		  [](const std::pair<int, size_t>& left, const std::pair<int, size_t>& right)
@@ -227,7 +229,6 @@ public:
 
 		if (min > 0)
 		{
-			std::cout << "Deleting some shit\n";
 			for (int i = 0; i < channels; i++)
 			{
 				channelMap[i]--;
@@ -239,7 +240,7 @@ public:
 
 		if (channelPos >= bufs.size())
 		{
-			bufs.push_back(dataStream->getData());
+			bufs.push_back(dataStream->getData(streamChannel));
 		}
 
 		return bufs[channelPos];
@@ -249,6 +250,7 @@ private:
 	std::map<int, size_t> channelMap;
 	std::deque<std::vector<T>> bufs;
 	std::shared_ptr<DataStream<T>> dataStream;
+	int streamChannel;
 	int channels;
 	int channel;
 	size_t numGets;
@@ -258,13 +260,14 @@ template <typename T>
 class Chopper : public DataStream<T>
 {
 public:
-	Chopper(std::shared_ptr<DataStream<T>> dataStream, double onTime, double offTime)
-		: dataStream(dataStream), t(0), onTime(onTime), period(onTime + offTime)
+	Chopper(std::shared_ptr<DataStream<T>> dataStream, int streamChannel,
+			double onTime, double offTime)
+		: dataStream(dataStream), streamChannel(streamChannel), t(0), onTime(onTime), period(onTime + offTime)
 	{ }
 
-	std::vector<T>& getData(int channel = 0) override
+	std::vector<T>& getData(int channel) override
 	{
-		auto& data = dataStream->getData();
+		auto& data = dataStream->getData(streamChannel);
 
 		buf.clear();
 		for(auto& x: data)
@@ -285,6 +288,7 @@ public:
 private:
 	std::vector<T> buf;
 	std::shared_ptr<DataStream<T>> dataStream;
+	int streamChannel;
 	double t;
 	double onTime;
 	double period;
@@ -294,13 +298,13 @@ template <typename T>
 class Transformer : public DataStream<T>
 {
 public:
-	Transformer(std::shared_ptr<DataStream<T>> dataStream)
-		: dataStream(dataStream)
+	Transformer(std::shared_ptr<DataStream<T>> dataStream, int streamChannel)
+		: dataStream(dataStream), streamChannel(streamChannel)
 	{ }
 
-	std::vector<T>& getData(int channel = 0) override
+	std::vector<T>& getData(int channel) override
 	{
-		auto& data = dataStream->getData();
+		auto& data = dataStream->getData(streamChannel);
 
 		buf.resize(data.size());
 
@@ -316,14 +320,15 @@ protected:
 private:
 	std::vector<T> buf;
 	std::shared_ptr<DataStream<T>> dataStream;
+	int streamChannel;
 };
 
 template <typename T>
 class Gain : public Transformer<T>
 {
 public:
-	Gain(std::shared_ptr<DataStream<T>> dataStream, T gain)
-		: Transformer<T>(dataStream), gain(gain)
+	Gain(std::shared_ptr<DataStream<T>> dataStream, int streamChannel, T gain)
+		: Transformer<T>(dataStream, streamChannel), gain(gain)
 	{ }
 
 	void setGain(const T& gain) { this->gain = gain; }
@@ -340,8 +345,8 @@ template <typename T>
 class Adder : public Transformer<T>
 {
 public:
-	Adder(std::shared_ptr<DataStream<T>> dataStream, T offset)
-		: Transformer<T>(dataStream), offset(offset)
+	Adder(std::shared_ptr<DataStream<T>> dataStream, int streamChannel, T offset)
+		: Transformer<T>(dataStream, streamChannel), offset(offset)
 	{ }
 
 	void setOffset(const T& offset) { this->offset = offset; }
@@ -358,14 +363,15 @@ template <typename T>
 class FirFilter : public DataStream<T>
 {
 public:
-	FirFilter(std::shared_ptr<DataStream<T>> dataStream,
+	FirFilter(std::shared_ptr<DataStream<T>> dataStream, int streamChannel,
 			std::shared_ptr<std::vector<T>> coefficients)
-		: dataStream(dataStream), coefficients(coefficients), first(true)
+		: dataStream(dataStream), streamChannel(streamChannel),
+		  coefficients(coefficients), first(true)
 	{ }
 
-	std::vector<T>& getData(int channel = 0) override
+	std::vector<T>& getData(int channel) override
 	{
-		auto& data = dataStream->getData();
+		auto& data = dataStream->getData(streamChannel);
 
 		buf.clear();
 		if (first)
@@ -399,6 +405,7 @@ public:
 
 private:
 	std::shared_ptr<DataStream<T>> dataStream;
+	int streamChannel;
 	std::shared_ptr<std::vector<T>> coefficients;
 	std::vector<T> buf;
 	std::list<T> taps;
@@ -410,11 +417,12 @@ class Combiner : public DataStream<T>
 {
 public:
 	Combiner(std::initializer_list<std::shared_ptr<DataStream<T>>> dataStreams,
+			int streamChannel,
 			U combiner = U())
-		: dataStreams(dataStreams), combiner(combiner)
+		: dataStreams(dataStreams), streamChannel(streamChannel), combiner(combiner)
 	{ }
 
-	std::vector<T>& getData(int channel = 0) override
+	std::vector<T>& getData(int channel) override
 	{
 		buf.clear();
 
@@ -425,12 +433,12 @@ public:
 			return buf;
 		}
 
-		auto& data0 = dataStreams[0]->getData();
+		auto& data0 = dataStreams[0]->getData(streamChannel);
 		buf.insert(buf.end(), data0.begin(), data0.end());
 
 		for(auto it = dataStreams.begin() + 1; it < dataStreams.end(); it++)
 		{
-			auto& data = (*it)->getData();
+			auto& data = (*it)->getData(streamChannel);
 			if (data0.size() != data.size())
 			{
 				std::cerr << "Size mismatch!\n";
@@ -449,6 +457,7 @@ public:
 private:
 	std::vector<T> buf;
 	std::vector<std::shared_ptr<DataStream<T>>> dataStreams;
+	int streamChannel;
 	U combiner;
 };
 
@@ -468,18 +477,19 @@ template <typename T>
 class AlsaMonoSink
 {
 public:
-	AlsaMonoSink(std::shared_ptr<DataStream<T>> dataStream)
-		: dataStream(dataStream),
+	AlsaMonoSink(std::shared_ptr<DataStream<T>> dataStream, int streamChannel)
+		: dataStream(dataStream), streamChannel(streamChannel),
 		  alsa(1, 48000, 500000)
 	{ }
 
 	void run()
 	{
-		alsa.write(dataStream->getData());
+		alsa.write(dataStream->getData(streamChannel));
 	}
 
 private:
 	std::shared_ptr<DataStream<T>> dataStream;
+	int streamChannel;
 	Alsa<T> alsa;
 };
 
@@ -488,15 +498,18 @@ class AlsaStereoSink
 {
 public:
 	AlsaStereoSink(std::shared_ptr<DataStream<T>> dataStreamLeft,
-			std::shared_ptr<DataStream<T>> dataStreamRight)
-		: dataStreamLeft(dataStreamLeft), dataStreamRight(dataStreamRight),
+			int streamChannelLeft,
+			std::shared_ptr<DataStream<T>> dataStreamRight,
+			int streamChannelRight)
+		: dataStreamLeft(dataStreamLeft), streamChannelLeft(streamChannelLeft),
+		  dataStreamRight(dataStreamRight), streamChannelRight(streamChannelRight),
 		  alsa(2, 48000, 500000)
 	{ }
 
 	void run()
 	{
-		auto& dataLeft = dataStreamLeft->getData();
-		auto& dataRight = dataStreamRight->getData();
+		auto& dataLeft = dataStreamLeft->getData(streamChannelLeft);
+		auto& dataRight = dataStreamRight->getData(streamChannelRight);
 
 		if (dataLeft.size() != dataRight.size())
 		{
@@ -517,7 +530,9 @@ public:
 private:
 	std::vector<T> buf;
 	std::shared_ptr<DataStream<T>> dataStreamLeft;
+	int streamChannelLeft;
 	std::shared_ptr<DataStream<T>> dataStreamRight;
+	int streamChannelRight;
 	Alsa<T> alsa;
 };
 
@@ -529,12 +544,12 @@ public:
 	: dataStream(dataStream), buf(len), len(len)
 	{ }
 
-	std::vector<T>& getData(int channel = 0) override
+	std::vector<T>& getData(int channel) override
 	{
 		// XXX: Replace this with a circular buffer
 		while (tmpBuf.size() < buf.size())
 		{
-			auto& data = dataStream->getData();
+			auto& data = dataStream->getData(channel);
 			tmpBuf.insert(tmpBuf.end(), data.begin(), data.end());
 		}
 
@@ -572,11 +587,11 @@ std::shared_ptr<DataStream<signalType>> shittyTone(double freq, signalType ampli
 {
 	auto tone = std::make_shared<SineSource<signalType>>(littleError(freq) / 48000.0, amplitude);
 	auto vibrato = std::make_shared<SineSource<signalType>>(vibrFreq / 48000.0, vibrAmplitude);
-	auto vibratoScaler = std::make_shared<Adder<signalType>>(vibrato, 1.0);
+	auto vibratoScaler = std::make_shared<Adder<signalType>>(vibrato, 0, 1.0);
 
 	return std::make_shared<Modulator<signalType>>(
 			std::initializer_list<std::shared_ptr<DataStream<signalType>>>(
-					{tone, vibratoScaler}));
+					{tone, vibratoScaler}), 0);
 }
 
 template <typename T>
@@ -606,7 +621,7 @@ std::vector<T> readFileIntoVector(std::string filename)
 
 int main()
 {
-#if 0
+#if 1
 	auto tone1 = shittyTone(125.0 / 2, 0.2, .1, 0.2);
 	auto tone2 = shittyTone(125.0 / 4, 0.3, .3, 0.2);
 	auto tone3 = shittyTone(125, 0.5, .5, 0.2);
@@ -623,9 +638,10 @@ int main()
 	auto combinedTones = std::make_shared<Mixer<signalType>>(
 			std::initializer_list<std::shared_ptr<DataStream<signalType>>>(
 					{tone1, tone2, tone3, tone4, tone5, tone6, tone7,
-					 tone9, tone10}));
+					 tone9, tone10}), 0);
 
-	auto masterChannel = std::make_shared<Gain<signalType>>(combinedTones, 1.0 / combinedTones->numStreams());
+	auto masterChannel = std::make_shared<Gain<signalType>>(combinedTones, 0,
+			1.0 / combinedTones->numStreams());
 
 	auto coeffs = std::make_shared<std::vector<signalType>>(
 			std::initializer_list<signalType>({
@@ -662,10 +678,18 @@ int main()
 	auto stdinSourceLeft  = std::make_shared<InterleavedVectorSource<signalType>>(fileVector.begin() + 0, 2);
 	auto stdinSourceRight = std::make_shared<InterleavedVectorSource<signalType>>(fileVector.begin() + 1, 2);
 
-	auto fir = std::make_shared<FirFilter<signalType>>(stdinSourceLeft, coeffs);
+	auto splitter = std::make_shared<Splitter<signalType>>(stdinSourceLeft, 0, 2);
+
+	//auto fir = std::make_shared<FirFilter<signalType>>(stdinSourceLeft, 0, coeffs);
+	//auto buffered = std::make_shared<DataBuffer<signalType>>(fir, 1024);
+
+	//AlsaStereoSink<signalType> sound(buffered, 0, stdinSourceRight, 0);
+
+	auto fir = std::make_shared<FirFilter<signalType>>(splitter, 1, coeffs);
 	auto buffered = std::make_shared<DataBuffer<signalType>>(fir, 1024);
 
-	AlsaStereoSink<signalType> sound(buffered, stdinSourceRight);
+	AlsaStereoSink<signalType> sound(splitter, 0, buffered, 0);
+
 	//AlsaMonoSink<signalType> sound(fir);
 	//AlsaStereoSink<signalType> sound(masterChannel, fir);
 
@@ -679,7 +703,7 @@ int main()
 
 	auto source1 = std::make_shared<IncrementSource<signalType>>(0, 4);
 
-	auto split= std::make_shared<Splitter<signalType>>(source1, 2);
+	auto split= std::make_shared<Splitter<signalType>>(source1, 0, 2);
 
 	std::cout << "0: \n";
 	auto d = split->getData(0);
