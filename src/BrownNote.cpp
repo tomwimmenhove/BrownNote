@@ -19,41 +19,17 @@
 #include <string>
 #include <iterator>
 #include <fstream>
+#include <map>
 
 #include "alsa.h"
 
 typedef float signalType;
 
 template <typename T>
-std::vector<T> readFileIntoVector(std::string filename)
-{
-    std::ifstream file(filename, std::ios::binary);
-
-    file.seekg(0, std::ios::end);
-    size_t fileSize = file.tellg();
-    file.seekg(0, std::ios::beg);
-
-    std::vector<int16_t> vec;
-	vec.resize(fileSize / sizeof(int16_t));
-
-	file.read((char *) vec.data(), fileSize);
-
-	std::vector<T> res;
-	res.reserve(vec.size());
-
-	for(auto& x: vec)
-	{
-		res.push_back(x / 32768.0);
-	}
-
-	return res;
-}
-
-template <typename T>
 class DataStream
 {
 public:
-	virtual std::vector<T>& getData() = 0;
+	virtual std::vector<T>& getData(int channel = 0) = 0;
 
 	virtual ~DataStream() { }
 };
@@ -66,7 +42,7 @@ public:
 		: buffer(values)
 	{ }
 
-	std::vector<T>& getData() override
+	std::vector<T>& getData(int channel = 0) override
 	{
 		return buffer;
 	}
@@ -83,7 +59,7 @@ public:
 		: dcValue(dcValue), buffer(n, dcValue)
 	{ }
 
-	std::vector<T>& getData() override { return buffer; }
+	std::vector<T>& getData(int channel = 0) override { return buffer; }
 
 private:
 	T dcValue;
@@ -99,7 +75,7 @@ public:
 	: it(it), buf(n), space(space), n(n)
 	{ }
 
-	std::vector<T>& getData() override
+	std::vector<T>& getData(int channel = 0) override
 	{
 		for(size_t i = 0; i < buf.size(); i++)
 		{
@@ -125,7 +101,7 @@ public:
 		: inc(rate * M_PI * 2), amplitude(amplitude),  buf(n), x(0)
 	{ }
 
-	std::vector<T>& getData() override
+	std::vector<T>& getData(int channel = 0) override
 	{
 		for(size_t i = 0; i < buf.size(); i++)
 		{
@@ -153,14 +129,14 @@ class NoiseSource: public DataStream<T>
 {
 public:
 	NoiseSource(T amplitude = 1.0, size_t n = 1024)
-		: amplitude(amplitude),  buf(n)
+		: amplitude(amplitude), buf(n)
 	{
 		std::random_device rd;
 	    rnd = std::default_random_engine(rd());
 	    distr = std::uniform_real_distribution<T>(-amplitude, amplitude);
 	}
 
-	std::vector<T>& getData() override
+	std::vector<T>& getData(int channel = 0) override
 	{
 		for(size_t i = 0; i < buf.size(); i++)
 		{
@@ -178,14 +154,37 @@ private:
 };
 
 template <typename T>
-class Splitter : public DataStream<T>
+class IncrementSource: public DataStream<T>
 {
 public:
-	Splitter(std::shared_ptr<DataStream<T>> dataStream, size_t channels)
+	IncrementSource(T start = 0, size_t n = 1024)
+		: c(start), buf(n)
+	{ }
+
+	std::vector<T>& getData(int channel = 0) override
+	{
+		for(size_t i = 0; i < buf.size(); i++)
+		{
+			buf[i] = c++;
+		}
+
+		return buf;
+	}
+
+private:
+	T c;
+	std::vector<T> buf;
+};
+
+template <typename T>
+class DataDuplicator : public DataStream<T>
+{
+public:
+	DataDuplicator(std::shared_ptr<DataStream<T>> dataStream, int channels)
 		: dataStream(dataStream), channels(channels), channel(0)
 	{ }
 
-	std::vector<T>& getData() override
+	std::vector<T>& getData(int channel = 0) override
 	{
 		if (channel == 0)
 		{
@@ -198,14 +197,61 @@ public:
 		{
 			channel = 0;
 		}
-
 	}
 
 private:
 	std::vector<T> buf;
 	std::shared_ptr<DataStream<T>> dataStream;
-	size_t channels;
-	size_t channel;
+	int channels;
+	int channel;
+};
+
+template <typename T>
+class Splitter : public DataStream<T>
+{
+public:
+	Splitter(std::shared_ptr<DataStream<T>> dataStream, int channels)
+		: dataStream(dataStream), channels(channels), channel(0), numGets(0)
+	{
+		for (int i = 0; i < channels; i++)
+		{
+			channelMap[i] = 0;
+		}
+	}
+
+	std::vector<T>& getData(int channel = 0) override
+	{
+		size_t min = (*min_element(channelMap.begin(), channelMap.end(),
+		    		  [](const std::pair<int, size_t>& left, const std::pair<int, size_t>& right)
+					  { return left.second < right.second; })).second;
+
+		if (min > 0)
+		{
+			std::cout << "Deleting some shit\n";
+			for (int i = 0; i < channels; i++)
+			{
+				channelMap[i]--;
+			}
+			bufs.pop_front();
+		}
+
+		size_t channelPos = channelMap[channel]++;
+
+		if (channelPos >= bufs.size())
+		{
+			bufs.push_back(dataStream->getData());
+		}
+
+		return bufs[channelPos];
+	}
+
+private:
+	std::map<int, size_t> channelMap;
+	std::deque<std::vector<T>> bufs;
+	std::shared_ptr<DataStream<T>> dataStream;
+	int channels;
+	int channel;
+	size_t numGets;
 };
 
 template <typename T>
@@ -216,7 +262,7 @@ public:
 		: dataStream(dataStream), t(0), onTime(onTime), period(onTime + offTime)
 	{ }
 
-	std::vector<T>& getData() override
+	std::vector<T>& getData(int channel = 0) override
 	{
 		auto& data = dataStream->getData();
 
@@ -252,7 +298,7 @@ public:
 		: dataStream(dataStream)
 	{ }
 
-	std::vector<T>& getData() override
+	std::vector<T>& getData(int channel = 0) override
 	{
 		auto& data = dataStream->getData();
 
@@ -317,7 +363,7 @@ public:
 		: dataStream(dataStream), coefficients(coefficients), first(true)
 	{ }
 
-	std::vector<T>& getData() override
+	std::vector<T>& getData(int channel = 0) override
 	{
 		auto& data = dataStream->getData();
 
@@ -368,7 +414,7 @@ public:
 		: dataStreams(dataStreams), combiner(combiner)
 	{ }
 
-	std::vector<T>& getData() override
+	std::vector<T>& getData(int channel = 0) override
 	{
 		buf.clear();
 
@@ -483,7 +529,7 @@ public:
 	: dataStream(dataStream), buf(len), len(len)
 	{ }
 
-	std::vector<T>& getData() override
+	std::vector<T>& getData(int channel = 0) override
 	{
 		// XXX: Replace this with a circular buffer
 		while (tmpBuf.size() < buf.size())
@@ -533,9 +579,34 @@ std::shared_ptr<DataStream<signalType>> shittyTone(double freq, signalType ampli
 					{tone, vibratoScaler}));
 }
 
+template <typename T>
+std::vector<T> readFileIntoVector(std::string filename)
+{
+    std::ifstream file(filename, std::ios::binary);
+
+    file.seekg(0, std::ios::end);
+    size_t fileSize = file.tellg();
+    file.seekg(0, std::ios::beg);
+
+    std::vector<int16_t> vec;
+	vec.resize(fileSize / sizeof(int16_t));
+
+	file.read((char *) vec.data(), fileSize);
+
+	std::vector<T> res;
+	res.reserve(vec.size());
+
+	for(auto& x: vec)
+	{
+		res.push_back(x / 32768.0);
+	}
+
+	return res;
+}
+
 int main()
 {
-#if 1
+#if 0
 	auto tone1 = shittyTone(125.0 / 2, 0.2, .1, 0.2);
 	auto tone2 = shittyTone(125.0 / 4, 0.3, .3, 0.2);
 	auto tone3 = shittyTone(125, 0.5, .5, 0.2);
@@ -606,28 +677,74 @@ int main()
 	return 0;
 #endif
 
-	auto source1 = std::make_shared<DumbSource<signalType>>(
-			std::initializer_list<signalType>({0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10})
-	);
+	auto source1 = std::make_shared<IncrementSource<signalType>>(0, 4);
 
-//	auto coeffs = std::make_shared<std::vector<signalType>>(
-//			std::initializer_list<signalType>({0, 0, 1, 0, 0}));
+	auto split= std::make_shared<Splitter<signalType>>(source1, 2);
 
-	//auto fir = std::make_shared<FirFilter<signalType>>(source1, coeffs);
+	std::cout << "0: \n";
+	auto d = split->getData(0);
+	for (auto& x: d)
+	{
+		std::cout << x << '\n';
+	}
 
-	auto& d1 = fir->getData();
-	for (auto& x: d1)
+	std::cout << "0: \n";
+	d = split->getData(0);
+	for (auto& x: d)
 	{
 		std::cout << x << '\n';
 	}
 
 	std::cout << '\n';
 
-	auto& d2 = fir->getData();
-	for (auto& x: d2)
+	std::cout << "1: \n";
+	d = split->getData(1);
+	for (auto& x: d)
 	{
 		std::cout << x << '\n';
 	}
+	std::cout << "1: \n";
+	d = split->getData(1);
+	for (auto& x: d)
+	{
+		std::cout << x << '\n';
+	}
+	std::cout << "1: \n";
+	d = split->getData(1);
+	for (auto& x: d)
+	{
+		std::cout << x << '\n';
+	}
+
+
+	std::cout << "0: \n";
+	d = split->getData(0);
+	for (auto& x: d)
+	{
+		std::cout << x << '\n';
+	}
+
+	std::cout << "0: \n";
+	d = split->getData(0);
+	for (auto& x: d)
+	{
+		std::cout << x << '\n';
+	}
+
+	std::cout << "1: \n";
+	d = split->getData(1);
+	for (auto& x: d)
+	{
+		std::cout << x << '\n';
+	}
+
+	std::cout << "1: \n";
+	d = split->getData(1);
+	for (auto& x: d)
+	{
+		std::cout << x << '\n';
+	}
+
 
 	std::cout << "Done\n";
 
