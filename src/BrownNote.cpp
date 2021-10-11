@@ -208,6 +208,33 @@ private:
 };
 
 template <typename T>
+class SharedPool
+{
+public:
+	std::shared_ptr<T> get()
+	{
+		if (pool.empty())
+		{
+			std::cout << "Allocating new element for pool\n";
+			return std::make_shared<T>();
+		}
+
+		auto res = pool.front();
+		pool.pop_front();
+
+		return res;
+	}
+
+	void giveBack(std::shared_ptr<T> x)
+	{
+		pool.push_back(x);
+	}
+
+private:
+	std::deque<std::shared_ptr<T>> pool;
+};
+
+template <typename T>
 class Splitter : public DataStream<T>
 {
 public:
@@ -223,16 +250,14 @@ public:
 
 	std::vector<T>& getData(int channel) override
 	{
-		size_t min = (*min_element(channelMap.begin(), channelMap.end(),
-		    		  [](const std::pair<int, size_t>& left, const std::pair<int, size_t>& right)
-					  { return left.second < right.second; })).second;
-
-		if (min > 0)
+		if (getMinChannelPos() > 0)
 		{
 			for (int i = 0; i < channels; i++)
 			{
 				channelMap[i]--;
 			}
+
+			pool.giveBack(bufs.front());
 			bufs.pop_front();
 		}
 
@@ -240,20 +265,39 @@ public:
 
 		if (channelPos >= bufs.size())
 		{
-			bufs.push_back(dataStream->getData(streamChannel));
+			auto& data = dataStream->getData(streamChannel);
+
+			bufs.push_back(getNewVector(data));
 		}
 
-		return bufs[channelPos];
+		return *bufs[channelPos];
 	}
 
 private:
+	size_t getMinChannelPos() const
+	{
+		return (*std::min_element(channelMap.begin(), channelMap.end(),
+	    		  [](const std::pair<int, size_t>& left, const std::pair<int, size_t>& right)
+				  { return left.second < right.second; })).second;
+	}
+
+	std::shared_ptr<std::vector<T>> getNewVector(std::vector<T>& original)
+	{
+		auto newVector = pool.get();
+		newVector->clear();
+		newVector->insert(newVector->end(), original.begin(), original.end());
+
+		return newVector;
+	}
+
 	std::map<int, size_t> channelMap;
-	std::deque<std::vector<T>> bufs;
+	std::deque<std::shared_ptr<std::vector<T>>> bufs;
 	std::shared_ptr<DataStream<T>> dataStream;
 	int streamChannel;
 	int channels;
 	int channel;
 	size_t numGets;
+	SharedPool<std::vector<T>> pool;
 };
 
 template <typename T>
