@@ -16,16 +16,44 @@
 #include <system_error>
 #include <random>
 #include <list>
+#include <string>
+#include <iterator>
+#include <fstream>
 
 #include "alsa.h"
 
 typedef float signalType;
 
 template <typename T>
+std::vector<T> readFileIntoVector(std::string filename)
+{
+    std::ifstream file(filename, std::ios::binary);
+
+    file.seekg(0, std::ios::end);
+    size_t fileSize = file.tellg();
+    file.seekg(0, std::ios::beg);
+
+    std::vector<int16_t> vec;
+	vec.resize(fileSize / sizeof(int16_t));
+
+	file.read((char *) vec.data(), fileSize);
+
+	std::vector<T> res;
+	res.reserve(vec.size());
+
+	for(auto& x: vec)
+	{
+		res.push_back(x / 32768.0);
+	}
+
+	return res;
+}
+
+template <typename T>
 class DataStream
 {
 public:
-	virtual std::vector<T>& getData() = 0;
+	virtual std::vector<T>& getData(bool reset = true) = 0;
 
 	virtual ~DataStream() { }
 };
@@ -38,7 +66,7 @@ public:
 		: buffer(values)
 	{ }
 
-	std::vector<T>& getData() override
+	std::vector<T>& getData(bool reset = true) override
 	{
 		return buffer;
 	}
@@ -55,11 +83,84 @@ public:
 		: dcValue(dcValue), buffer(n, dcValue)
 	{ }
 
-	std::vector<T>& getData() override { return buffer; }
+	std::vector<T>& getData(bool reset = true) override { return buffer; }
 
 private:
 	T dcValue;
 	std::vector<T> buffer;
+};
+
+template <typename T>
+class InterleavedVectorSource: public DataStream<T>
+{
+public:
+	InterleavedVectorSource(typename std::vector<T>::iterator it,
+			size_t space, size_t n = 1024)
+	: it(it), buf(n), space(space), n(n)
+	{ }
+
+	std::vector<T>& getData(bool reset = true) override
+	{
+		for(size_t i = 0; i < buf.size(); i++)
+		{
+			buf[i] = *it;
+			it += space;
+		}
+
+		return buf;
+	}
+
+private:
+	typename std::vector<T>::iterator it;
+	std::vector<T> buf;
+	size_t space;
+	size_t n;
+};
+
+
+template <typename T>
+class FileInt16Source: public DataStream<T>
+{
+public:
+	FileInt16Source(std::string fileName, size_t n = 1024)
+		: ioBuf(n * 2)
+	{
+		file = std::ifstream(fileName);
+	}
+
+	std::vector<T>& getData(bool reset = true) override
+	{
+		size_t byteSize = ioBuf.size() * sizeof(int16_t);
+
+		file.read((char*) ioBuf.data(), byteSize);
+
+		if (reset)
+		{
+			bufLeft.clear();
+			bufRight.clear();
+		}
+
+		for (size_t i = 0; i < ioBuf.size(); i++)
+		{
+			T x = ioBuf[i] / 32768.0;
+			if ((i & 1) == 0)
+			{
+				bufLeft.push_back(x);
+			}
+			else
+			{
+				bufRight.push_back(x);
+			}
+		}
+
+		return reset ? bufLeft : bufRight;
+	}
+
+private:
+	std::vector<int16_t> ioBuf;
+	std::vector<T> bufLeft;
+	std::vector<T> bufRight;
+	std::ifstream file;
 };
 
 template <typename T>
@@ -70,7 +171,7 @@ public:
 		: inc(rate * M_PI * 2), amplitude(amplitude),  buf(n), x(0)
 	{ }
 
-	std::vector<T>& getData() override
+	std::vector<T>& getData(bool reset = true) override
 	{
 		for(size_t i = 0; i < buf.size(); i++)
 		{
@@ -105,7 +206,7 @@ public:
 	    distr = std::uniform_real_distribution<T>(-amplitude, amplitude);
 	}
 
-	std::vector<T>& getData() override
+	std::vector<T>& getData(bool reset = true) override
 	{
 		for(size_t i = 0; i < buf.size(); i++)
 		{
@@ -130,7 +231,7 @@ public:
 		: dataStream(dataStream), channels(channels), channel(0)
 	{ }
 
-	std::vector<T>& getData() override
+	std::vector<T>& getData(bool reset = true) override
 	{
 		if (channel == 0)
 		{
@@ -144,7 +245,6 @@ public:
 			channel = 0;
 		}
 
-		return buf;
 	}
 
 private:
@@ -162,7 +262,7 @@ public:
 		: dataStream(dataStream), t(0), onTime(onTime), period(onTime + offTime)
 	{ }
 
-	std::vector<T>& getData() override
+	std::vector<T>& getData(bool reset = true) override
 	{
 		auto& data = dataStream->getData();
 
@@ -198,7 +298,7 @@ public:
 		: dataStream(dataStream)
 	{ }
 
-	std::vector<T>& getData() override
+	std::vector<T>& getData(bool reset = true) override
 	{
 		auto& data = dataStream->getData();
 
@@ -263,7 +363,7 @@ public:
 		: dataStream(dataStream), coefficients(coefficients), first(true)
 	{ }
 
-	std::vector<T>& getData() override
+	std::vector<T>& getData(bool reset = true) override
 	{
 		auto& data = dataStream->getData();
 
@@ -314,7 +414,7 @@ public:
 		: dataStreams(dataStreams), combiner(combiner)
 	{ }
 
-	std::vector<T>& getData() override
+	std::vector<T>& getData(bool reset = true) override
 	{
 		buf.clear();
 
@@ -400,7 +500,7 @@ public:
 
 		if (dataLeft.size() != dataRight.size())
 		{
-			std::cerr << "Size mismatch!\n";
+			std::cerr << "Size mismatch! (" << dataLeft.size() << " vs " << dataRight.size() << ")\n";
 			return;
 		}
 
@@ -429,13 +529,15 @@ public:
 	: dataStream(dataStream), buf(len), len(len)
 	{ }
 
-	std::vector<T>& getData() override
+	std::vector<T>& getData(bool reset = true) override
 	{
 		// XXX: Replace this with a circular buffer
 		while (tmpBuf.size() < buf.size())
 		{
-			auto& data = dataStream->getData();
+			auto& data = dataStream->getData(reset);
 			tmpBuf.insert(tmpBuf.end(), data.begin(), data.end());
+
+			reset = false;
 		}
 
 		buf.clear();
@@ -505,234 +607,58 @@ int main()
 	auto coeffs = std::make_shared<std::vector<signalType>>(
 			std::initializer_list<signalType>({
 		//0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-		    0.000000000000000000,
-		    0.000000205220313655,
-		    0.000000800565252165,
-		    0.000001738083935335,
-		    0.000002946668469349,
-		    0.000004332551256612,
-		    0.000005780199056154,
-		    0.000007153625780856,
-		    0.000008298145995883,
-		    0.000009042589869549,
-		    0.000009201997711926,
-		    0.000008580808045391,
-		    0.000006976547260869,
-		    0.000004184021254115,
-		    0.000000000000000000,
-		    -0.000005771625133890,
-		    -0.000013314244284874,
-		    -0.000022792539308313,
-		    -0.000034346163705638,
-		    -0.000048083170778645,
-		    -0.000064073285067461,
-		    -0.000082341128675520,
-		    -0.000102859530154631,
-		    -0.000125543058709001,
-		    -0.000150241940052304,
-		    -0.000176736521783521,
-		    -0.000204732465110968,
-		    -0.000233856845647756,
-		    -0.000263655348361988,
-		    -0.000293590740179479,
-		    -0.000323042797860379,
-		    -0.000351309858337795,
-		    -0.000377612143541712,
-		    -0.000401096991761649,
-		    -0.000420846102862702,
-		    -0.000435884875313021,
-		    -0.000445193879276383,
-		    -0.000447722472360536,
-		    -0.000442404523496970,
-		    -0.000428176166479462,
-		    -0.000403995458630660,
-		    -0.000368863772715206,
-		    -0.000321848702472727,
-		    -0.000262108214967427,
-		    -0.000188915737353484,
-		    -0.000101685822674966,
-		    0.000000000000000000,
-		    0.000116367620440045,
-		    0.000247425445384273,
-		    0.000392940680566994,
-		    0.000552417292138758,
-		    0.000725076149684481,
-		    0.000909837850931089,
-		    0.001105308716856385,
-		    0.001309770424950760,
-		    0.001521173717709981,
-		    0.001737136583101248,
-		    0.001954947253987342,
-		    0.002171572314750029,
-		    0.002383670136252239,
-		    0.002587609785635392,
-		    0.002779495476259425,
-		    0.002955196536521158,
-		    0.003110382785644688,
-		    0.003240565111268042,
-		    0.003341140949303757,
-		    0.003407444272757235,
-		    0.003434799604628945,
-		    0.003418579482408673,
-		    0.003354264719686795,
-		    0.003237506735710646,
-		    0.003064191157880448,
-		    0.002830501846679000,
-		    0.002532984448694338,
-		    0.002168608552391007,
-		    0.001734827504085592,
-		    0.001229634938942527,
-		    0.000651617094246841,
-		    -0.000000000000000001,
-		    -0.000725309314971827,
-		    -0.001523688404975113,
-		    -0.002393772508264427,
-		    -0.003333435810973696,
-		    -0.004339781419200553,
-		    -0.005409140473684443,
-		    -0.006537080721082672,
-		    -0.007718424727313622,
-		    -0.008947277783720996,
-		    -0.010217065417981456,
-		    -0.011520580280906533,
-		    -0.012850038039829838,
-		    -0.014197141771409535,
-		    -0.015553154213697896,
-		    -0.016908977111474092,
-		    -0.018255236772257873,
-		    -0.019582374845152281,
-		    -0.020880743242572337,
-		    -0.022140702047678169,
-		    -0.023352719189390539,
-		    -0.024507470623414705,
-		    -0.025595939732644749,
-		    -0.026609514654277543,
-		    -0.027540082254233701,
-		    -0.028380117502042779,
-		    -0.029122767050860483,
-		    -0.029761925897087635,
-		    -0.030292306081184828,
-		    -0.030709496494461141,
-		    -0.031010012974323684,
-		    -0.031191338000921467,
-		    0.968748050550699014,
-		    -0.031191338000921467,
-		    -0.031010012974323684,
-		    -0.030709496494461141,
-		    -0.030292306081184828,
-		    -0.029761925897087635,
-		    -0.029122767050860480,
-		    -0.028380117502042779,
-		    -0.027540082254233701,
-		    -0.026609514654277543,
-		    -0.025595939732644749,
-		    -0.024507470623414705,
-		    -0.023352719189390539,
-		    -0.022140702047678169,
-		    -0.020880743242572341,
-		    -0.019582374845152285,
-		    -0.018255236772257873,
-		    -0.016908977111474096,
-		    -0.015553154213697901,
-		    -0.014197141771409535,
-		    -0.012850038039829842,
-		    -0.011520580280906531,
-		    -0.010217065417981458,
-		    -0.008947277783721000,
-		    -0.007718424727313622,
-		    -0.006537080721082674,
-		    -0.005409140473684441,
-		    -0.004339781419200552,
-		    -0.003333435810973697,
-		    -0.002393772508264428,
-		    -0.001523688404975113,
-		    -0.000725309314971827,
-		    -0.000000000000000001,
-		    0.000651617094246841,
-		    0.001229634938942527,
-		    0.001734827504085592,
-		    0.002168608552391009,
-		    0.002532984448694338,
-		    0.002830501846679000,
-		    0.003064191157880449,
-		    0.003237506735710646,
-		    0.003354264719686798,
-		    0.003418579482408676,
-		    0.003434799604628947,
-		    0.003407444272757236,
-		    0.003341140949303757,
-		    0.003240565111268045,
-		    0.003110382785644690,
-		    0.002955196536521160,
-		    0.002779495476259425,
-		    0.002587609785635392,
-		    0.002383670136252239,
-		    0.002171572314750031,
-		    0.001954947253987344,
-		    0.001737136583101249,
-		    0.001521173717709984,
-		    0.001309770424950761,
-		    0.001105308716856385,
-		    0.000909837850931088,
-		    0.000725076149684482,
-		    0.000552417292138759,
-		    0.000392940680566994,
-		    0.000247425445384273,
-		    0.000116367620440046,
-		    0.000000000000000000,
-		    -0.000101685822674966,
-		    -0.000188915737353484,
-		    -0.000262108214967427,
-		    -0.000321848702472727,
-		    -0.000368863772715206,
-		    -0.000403995458630660,
-		    -0.000428176166479462,
-		    -0.000442404523496970,
-		    -0.000447722472360536,
-		    -0.000445193879276384,
-		    -0.000435884875313022,
-		    -0.000420846102862703,
-		    -0.000401096991761649,
-		    -0.000377612143541712,
-		    -0.000351309858337795,
-		    -0.000323042797860378,
-		    -0.000293590740179479,
-		    -0.000263655348361988,
-		    -0.000233856845647756,
-		    -0.000204732465110968,
-		    -0.000176736521783522,
-		    -0.000150241940052304,
-		    -0.000125543058709001,
-		    -0.000102859530154631,
-		    -0.000082341128675520,
-		    -0.000064073285067461,
-		    -0.000048083170778645,
-		    -0.000034346163705638,
-		    -0.000022792539308313,
-		    -0.000013314244284874,
-		    -0.000005771625133890,
-		    0.000000000000000000,
-		    0.000004184021254115,
-		    0.000006976547260869,
-		    0.000008580808045392,
-		    0.000009201997711926,
-		    0.000009042589869549,
-		    0.000008298145995883,
-		    0.000007153625780856,
-		    0.000005780199056154,
-		    0.000004332551256612,
-		    0.000002946668469349,
-		    0.000001738083935335,
-		    0.000000800565252165,
-		    0.000000205220313655,
-		    0.000000000000000000,
+		    -0.002358258944270119,
+		    -0.007526945344873014,
+		    -0.015573611628181589,
+		    -0.026138064594218191,
+		    -0.038466251452612468,
+		    -0.024411419250561235,
+		    -0.005436182231086863,
+		    0.015184898862007697,
+		    0.033601900459646179,
+		    0.046130905137397156,
+		    0.049986057973503535,
+		    0.046130905137396407,
+		    0.033601900459646381,
+		    0.015184898862008177,
+		    -0.005436182231086864,
+		    -0.024411419250561336,
+		    -0.038466251452612427,
+		    -0.026138064594218201,
+		    -0.015573611628181553,
+		    -0.007526945344872948,
+		    -0.002358258944270082,
 	}));
 
 	//auto clap = std::make_shared<Chopper<signalType>>(hisssss, 48000.0 / 100.0, 48000.0 / 100.0);
 
-	auto fir = std::make_shared<FirFilter<signalType>>(masterChannel, coeffs);
+	//auto fir = std::make_shared<FirFilter<signalType>>(hisssss, coeffs);
 
-	AlsaMonoSink<signalType> sound(fir);
+	//auto stdinSource = std::make_shared<StdinInt16Source<signalType>>();
+	auto fileSource = std::make_shared<FileInt16Source<signalType>>("/home/tom/git/BrownNote/file.raw");
+
+//    std::ifstream file("/home/tom/git/BrownNote/file.raw", std::ios::binary);
+//
+//    file.seekg(0, std::ios::end);
+//    size_t fileSize = file.tellg();
+//    file.seekg(0, std::ios::beg);
+//
+//    std::vector<int16_t> vec;
+//	vec.resize(fileSize / sizeof(int16_t));
+//
+//	file.read((char *) vec.data(), fileSize);
+
+	auto fileVector = readFileIntoVector<signalType>("/home/tom/git/BrownNote/file.raw");
+
+
+	auto stdinSourceLeft  = std::make_shared<InterleavedVectorSource<signalType>>(fileVector.begin() + 0, 2);
+	auto stdinSourceRight = std::make_shared<InterleavedVectorSource<signalType>>(fileVector.begin() + 1, 2);
+
+	auto fir = std::make_shared<FirFilter<signalType>>(stdinSourceLeft, coeffs);
+	auto buffered = std::make_shared<DataBuffer<signalType>>(fir, 1024);
+
+	AlsaStereoSink<signalType> sound(buffered, stdinSourceRight);
+	//AlsaMonoSink<signalType> sound(fir);
 	//AlsaStereoSink<signalType> sound(masterChannel, fir);
 
 	while (true)
