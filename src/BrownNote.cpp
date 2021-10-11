@@ -35,6 +35,13 @@ public:
 };
 
 template <typename T>
+struct DataChannel
+{
+	std::shared_ptr<DataStream<T>> stream;
+	int channel;
+};
+
+template <typename T>
 class DumbSource: public DataStream<T>
 {
 public:
@@ -460,29 +467,28 @@ template <typename T, typename U>
 class Combiner : public DataStream<T>
 {
 public:
-	Combiner(std::initializer_list<std::shared_ptr<DataStream<T>>> dataStreams,
-			int streamChannel,
+	Combiner(std::initializer_list<DataChannel<T>> dataChannels,
 			U combiner = U())
-		: dataStreams(dataStreams), streamChannel(streamChannel), combiner(combiner)
+		: dataChannels(dataChannels), combiner(combiner)
 	{ }
 
 	std::vector<T>& getData(int channel) override
 	{
 		buf.clear();
 
-		if (dataStreams.size() == 0)
+		if (dataChannels.size() == 0)
 		{
 			buf.resize(1024);
 
 			return buf;
 		}
 
-		auto& data0 = dataStreams[0]->getData(streamChannel);
+		auto& data0 = dataChannels[0].stream->getData(dataChannels[0].channel);
 		buf.insert(buf.end(), data0.begin(), data0.end());
 
-		for(auto it = dataStreams.begin() + 1; it < dataStreams.end(); it++)
+		for(auto it = dataChannels.begin() + 1; it < dataChannels.end(); it++)
 		{
-			auto& data = (*it)->getData(streamChannel);
+			auto& data = it->stream->getData(it->channel);
 			if (data0.size() != data.size())
 			{
 				std::cerr << "Size mismatch!\n";
@@ -496,12 +502,11 @@ public:
 		return buf;
 	}
 
-	size_t numStreams() const { return dataStreams.size(); }
+	size_t numStreams() const { return dataChannels.size(); }
 
 private:
 	std::vector<T> buf;
-	std::vector<std::shared_ptr<DataStream<T>>> dataStreams;
-	int streamChannel;
+	std::vector<DataChannel<T>> dataChannels;
 	U combiner;
 };
 
@@ -663,8 +668,8 @@ std::shared_ptr<DataStream<signalType>> shittyTone(double freq, signalType ampli
 	auto vibratoScaler = std::make_shared<Adder<signalType>>(vibrato, 0, 1.0);
 
 	return std::make_shared<Modulator<signalType>>(
-			std::initializer_list<std::shared_ptr<DataStream<signalType>>>(
-					{tone, vibratoScaler}), 0);
+			std::initializer_list<DataChannel<signalType>>(
+					{{tone, 0}, {vibratoScaler, 0}}));
 }
 
 template <typename T>
@@ -709,9 +714,12 @@ int main()
 	auto hisssss =  std::make_shared<NoiseSource<signalType>>(1.0);
 
 	auto combinedTones = std::make_shared<Mixer<signalType>>(
-			std::initializer_list<std::shared_ptr<DataStream<signalType>>>(
-					{tone1, tone2, tone3, tone4, tone5, tone6, tone7,
-					 tone9, tone10}), 0);
+			std::initializer_list<DataChannel<signalType>>(
+					{ { tone1, 0 }, { tone2, 0 },
+					  { tone3, 0 }, { tone4, 0 },
+					  { tone5, 0 }, { tone6, 0 },
+					  { tone7, 0 }, { tone9, 0 },
+					  { tone10, 0 }, }));
 
 	auto masterChannel = std::make_shared<Gain<signalType>>(combinedTones, 0,
 			1.0 / combinedTones->numStreams());
@@ -761,10 +769,14 @@ int main()
 	//auto fir = std::make_shared<FirFilter<signalType>>(splitter, 1, coeffs);
 	//auto buffered = std::make_shared<DataBuffer<signalType>>(fir, 1024);
 
-	auto delay = std::make_shared<DelayLine<signalType>>(splitter, 48000 / 4);
+	auto delay = std::make_shared<DelayLine<signalType>>(splitter, 48000 / 8);
 	auto buffered = std::make_shared<DataBuffer<signalType>>(delay, 1024);
 
-	AlsaStereoSink<signalType> sound(splitter, 0, buffered, 1);
+	auto echo = std::make_shared<Mixer<signalType>>(
+			std::initializer_list<DataChannel<signalType>>(
+					{{buffered, 0}, {splitter, 1}}));
+
+	AlsaStereoSink<signalType> sound(echo, 0, stdinSourceRight, 0);
 
 	//AlsaMonoSink<signalType> sound(fir);
 	//AlsaStereoSink<signalType> sound(masterChannel, fir);
