@@ -581,6 +581,35 @@ private:
 };
 
 template <typename T>
+class DelayLine : public DataStream<T>
+{
+public:
+	DelayLine(std::shared_ptr<DataStream<T>> dataStream, size_t delay)
+	: dataStream(dataStream), buf(delay), first(true)
+	{ }
+
+	std::vector<T>& getData(int channel) override
+	{
+		if (first)
+		{
+			first = false;
+
+			return buf;
+		}
+
+		/* Deallocate the silent buffer */
+		buf = std::vector<T>();
+
+		return dataStream->getData(channel);
+	}
+
+private:
+	std::shared_ptr<DataStream<T>> dataStream;
+	std::vector<T> buf;
+	bool first;
+};
+
+template <typename T>
 class DataBuffer : public DataStream<T>
 {
 public:
@@ -729,10 +758,13 @@ int main()
 
 	//AlsaStereoSink<signalType> sound(buffered, 0, stdinSourceRight, 0);
 
-	auto fir = std::make_shared<FirFilter<signalType>>(splitter, 1, coeffs);
-	auto buffered = std::make_shared<DataBuffer<signalType>>(fir, 1024);
+	//auto fir = std::make_shared<FirFilter<signalType>>(splitter, 1, coeffs);
+	//auto buffered = std::make_shared<DataBuffer<signalType>>(fir, 1024);
 
-	AlsaStereoSink<signalType> sound(splitter, 0, buffered, 0);
+	auto delay = std::make_shared<DelayLine<signalType>>(splitter, 48000 / 4);
+	auto buffered = std::make_shared<DataBuffer<signalType>>(delay, 1024);
+
+	AlsaStereoSink<signalType> sound(splitter, 0, buffered, 1);
 
 	//AlsaMonoSink<signalType> sound(fir);
 	//AlsaStereoSink<signalType> sound(masterChannel, fir);
