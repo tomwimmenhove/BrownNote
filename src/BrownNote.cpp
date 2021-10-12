@@ -45,27 +45,27 @@ template <typename T>
 class SharedPool
 {
 public:
-	std::shared_ptr<T> get()
+	T get()
 	{
 		if (pool.empty())
 		{
 			std::cout << "Allocating new element for pool\n";
-			return std::make_shared<T>();
+			return T();
 		}
 
-		auto res = pool.front();
+		auto res = std::move(pool.front());
 		pool.pop_front();
 
 		return res;
 	}
 
-	void giveBack(std::shared_ptr<T> x)
+	void giveBack(T&& x)
 	{
-		pool.push_back(x);
+		pool.push_back(std::move(x));
 	}
 
 private:
-	std::deque<std::shared_ptr<T>> pool;
+	std::deque<T> pool;
 };
 
 template <typename T>
@@ -334,7 +334,7 @@ class Splitter : public DataStream<T>
 public:
 	Splitter(DataChannel<T> dataChannel, int channels)
 		: dataChannel(dataChannel),
-		  channelPositions(channels), channels(channels), channel(0), numGets(0)
+		  channelPositions(channels), channels(channels)
 	{ }
 
 	std::vector<T>& getData(int channel) override
@@ -347,7 +347,7 @@ public:
 				channelPositions[i]--;
 			}
 
-			pool.giveBack(bufs.front());
+			pool.giveBack(std::move(bufs.front()));
 			bufs.pop_front();
 		}
 
@@ -357,28 +357,26 @@ public:
 		{
 			auto& data = dataChannel.stream->getData(dataChannel.channel);
 
-			bufs.push_back(getNewVector(data));
+			bufs.push_back(std::move(getNewVector(data)));
 		}
 
-		return *bufs[channelPos];
+		return bufs[channelPos];
 	}
 
 private:
-	std::shared_ptr<std::vector<T>> getNewVector(std::vector<T>& original)
+	std::vector<T> getNewVector(std::vector<T>& original)
 	{
 		auto newVector = pool.get();
-		newVector->clear();
-		newVector->insert(newVector->end(), original.begin(), original.end());
+		newVector.clear();
+		newVector.insert(newVector.end(), original.begin(), original.end());
 
 		return newVector;
 	}
 
-	std::deque<std::shared_ptr<std::vector<T>>> bufs;
+	std::deque<std::vector<T>> bufs;
 	DataChannel<T> dataChannel;
 	std::vector<size_t> channelPositions;
 	int channels;
-	int channel;
-	size_t numGets;
 	SharedPool<std::vector<T>> pool;
 };
 
