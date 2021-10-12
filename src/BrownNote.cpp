@@ -246,28 +246,24 @@ class Splitter : public DataStream<T>
 public:
 	Splitter(DataChannel<T> dataChannel, int channels)
 		: dataChannel(dataChannel),
-		  channels(channels), channel(0), numGets(0)
-	{
-		for (int i = 0; i < channels; i++)
-		{
-			channelMap[i] = 0;
-		}
-	}
+		  channelPositions(channels), channels(channels), channel(0), numGets(0)
+	{ }
 
 	std::vector<T>& getData(int channel) override
 	{
-		if (getMinChannelPos() > 0)
+		size_t minPos = *std::min_element(channelPositions.begin(), channelPositions.end());
+		if (minPos > 0)
 		{
 			for (int i = 0; i < channels; i++)
 			{
-				channelMap[i]--;
+				channelPositions[i]--;
 			}
 
 			pool.giveBack(bufs.front());
 			bufs.pop_front();
 		}
 
-		size_t channelPos = channelMap[channel]++;
+		size_t channelPos = channelPositions[channel]++;
 
 		if (channelPos >= bufs.size())
 		{
@@ -280,13 +276,6 @@ public:
 	}
 
 private:
-	size_t getMinChannelPos() const
-	{
-		return (*std::min_element(channelMap.begin(), channelMap.end(),
-	    		  [](const std::pair<int, size_t>& left, const std::pair<int, size_t>& right)
-				  { return left.second < right.second; })).second;
-	}
-
 	std::shared_ptr<std::vector<T>> getNewVector(std::vector<T>& original)
 	{
 		auto newVector = pool.get();
@@ -296,9 +285,9 @@ private:
 		return newVector;
 	}
 
-	std::map<int, size_t> channelMap;
 	std::deque<std::shared_ptr<std::vector<T>>> bufs;
 	DataChannel<T> dataChannel;
+	std::vector<size_t> channelPositions;
 	int channels;
 	int channel;
 	size_t numGets;
