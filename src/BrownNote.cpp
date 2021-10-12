@@ -86,6 +86,66 @@ private:
 };
 
 template <typename T>
+class FileReaderSoure : public DataStream<T>
+{
+public:
+	FileReaderSoure(std::string filename, size_t n = 1024)
+		: n(n), buf(n)
+	{
+		file = std::ifstream(filename, std::ios::binary);
+	}
+
+	std::vector<T>& getData(int channel) override
+	{
+		buf.resize(n);
+		size_t byteSize = n * sizeof(T);
+
+		file.read((char *) buf.data(), byteSize);
+
+		size_t cnt = file.gcount();
+
+		if (cnt < byteSize)
+		{
+			buf.resize(cnt / sizeof(T));
+		}
+
+		return buf;
+	}
+
+private:
+	size_t n;
+	std::vector<T> buf;
+	std::ifstream file;
+};
+
+template <typename T, typename U>
+class DataStreamConverter: public DataStream<T>
+{
+public:
+	DataStreamConverter(std::shared_ptr<DataStream<U>> dataStream, std::function<T(U)> converter)
+		: dataStream(dataStream), converter(converter)
+	{ }
+
+	std::vector<T>& getData(int channel) override
+	{
+		buf.clear();
+		auto& data = dataStream->getData(channel);
+
+		for(auto& x: data)
+		{
+			buf.push_back(converter(x));
+		}
+
+		return buf;
+	}
+
+private:
+	std::vector<T> buf;
+	std::shared_ptr<DataStream<U>> dataStream;
+	std::function<T(U)> converter;
+};
+
+template <typename T>
 class DcSource: public DataStream<T>
 {
 public:
@@ -238,6 +298,34 @@ private:
 	std::shared_ptr<DataStream<T>> dataStream;
 	int channels;
 	int curChannel;
+};
+
+template <typename T>
+class Deinterleaver : public DataStream<T>
+{
+public:
+	Deinterleaver(DataChannel<T> dataChannel, size_t start, size_t inc)
+		: dataChannel(dataChannel), start(start), inc(inc)
+	{ }
+
+	std::vector<T>& getData(int channel) override
+	{
+		auto& data = dataChannel.stream->getData(dataChannel.channel);
+
+		buf.clear();
+		for (size_t i = start; i < data.size(); i += inc)
+		{
+			buf.push_back(data[i]);
+		}
+
+		return buf;
+	}
+
+private:
+	std::vector<T> buf;
+	DataChannel<T> dataChannel;
+	size_t start;
+	size_t inc;
 };
 
 template <typename T>
@@ -676,6 +764,27 @@ std::vector<T> readFileIntoVector(std::string filename)
 
 int main()
 {
+	std::string filename = "/home/tom/git/BrownNote/file.raw";
+
+	auto fileReader = std::make_shared<FileReaderSoure<int16_t>>(filename, 2048);
+
+	auto converter = std::make_shared<DataStreamConverter<signalType, int16_t>>(fileReader,
+			[] (int16_t x) { return (float) x / 32768.0f; });
+
+	auto fileSplitter = std::make_shared<Splitter<signalType>>(DataChannel<signalType>{converter, 0}, 2);
+
+	auto left = std::make_shared<Deinterleaver<signalType>>(DataChannel<signalType>{fileSplitter, 0}, 0, 2);
+	auto right = std::make_shared<Deinterleaver<signalType>>(DataChannel<signalType>{fileSplitter, 1}, 1, 2);
+
+	AlsaStereoSink<signalType> s({left, 0}, {right, 1});
+	//AlsaMonoSink<signalType> s({right, 0});
+
+	while (true)
+	{
+		s.run();
+	}
+
+	return 0;
 #if 1
 	auto tone1 = shittyTone(125.0 / 2, 0.2, .1, 0.2);
 	auto tone2 = shittyTone(125.0 / 4, 0.3, .3, 0.2);
@@ -731,7 +840,7 @@ int main()
 
 	//auto fir = std::make_shared<FirFilter<signalType>>(hisssss, coeffs);
 
-	auto fileVector = readFileIntoVector<signalType>("/home/tom/git/BrownNote/file.raw");
+	auto fileVector = readFileIntoVector<signalType>(filename);
 
 	auto stdinSourceLeft  = std::make_shared<InterleavedVectorSource<signalType>>(fileVector.begin() + 0, 2);
 	auto stdinSourceRight = std::make_shared<InterleavedVectorSource<signalType>>(fileVector.begin() + 1, 2);
