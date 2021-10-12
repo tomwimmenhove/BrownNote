@@ -29,7 +29,7 @@ template <typename T>
 class DataStream
 {
 public:
-	virtual std::vector<T>& getData(int channel) = 0;
+	virtual const std::vector<T>& getData(int channel) = 0;
 
 	virtual ~DataStream() { }
 };
@@ -59,7 +59,7 @@ public:
 		return res;
 	}
 
-	void giveBack(T&& x)
+	void giveBack(const T&& x)
 	{
 		pool.push_back(std::move(x));
 	}
@@ -76,7 +76,7 @@ public:
 		: buffer(values)
 	{ }
 
-	std::vector<T>& getData(int channel) override
+	const std::vector<T>& getData(int channel) override
 	{
 		return buffer;
 	}
@@ -95,7 +95,7 @@ public:
 		file = std::ifstream(filename, std::ios::binary);
 	}
 
-	std::vector<T>& getData(int channel) override
+	const std::vector<T>& getData(int channel) override
 	{
 		buf.resize(n);
 		size_t byteSize = n * sizeof(T);
@@ -126,7 +126,7 @@ public:
 		: dataStream(dataStream), converter(converter)
 	{ }
 
-	std::vector<T>& getData(int channel) override
+	const std::vector<T>& getData(int channel) override
 	{
 		buf.clear();
 		auto& data = dataStream->getData(channel);
@@ -153,7 +153,7 @@ public:
 		: dcValue(dcValue), buffer(n, dcValue)
 	{ }
 
-	std::vector<T>& getData(int channel) override { return buffer; }
+	const std::vector<T>& getData(int channel) override { return buffer; }
 
 private:
 	T dcValue;
@@ -169,7 +169,7 @@ public:
 	: it(it), buf(n), space(space), n(n)
 	{ }
 
-	std::vector<T>& getData(int channel) override
+	const std::vector<T>& getData(int channel) override
 	{
 		for(size_t i = 0; i < buf.size(); i++)
 		{
@@ -195,7 +195,7 @@ public:
 		: inc(rate * M_PI * 2), amplitude(amplitude),  buf(n), x(0)
 	{ }
 
-	std::vector<T>& getData(int channel) override
+	const std::vector<T>& getData(int channel) override
 	{
 		for(size_t i = 0; i < buf.size(); i++)
 		{
@@ -230,7 +230,7 @@ public:
 	    distr = std::uniform_real_distribution<T>(-amplitude, amplitude);
 	}
 
-	std::vector<T>& getData(int channel) override
+	const std::vector<T>& getData(int channel) override
 	{
 		for(size_t i = 0; i < buf.size(); i++)
 		{
@@ -255,7 +255,7 @@ public:
 		: c(start), buf(n)
 	{ }
 
-	std::vector<T>& getData(int channel) override
+	const std::vector<T>& getData(int channel) override
 	{
 		for(size_t i = 0; i < buf.size(); i++)
 		{
@@ -278,7 +278,7 @@ public:
 		: dataStream(dataStream), channels(channels), curChannel(0)
 	{ }
 
-	std::vector<T>& getData(int channel) override
+	const std::vector<T>& getData(int channel) override
 	{
 		if (channel == 0)
 		{
@@ -304,11 +304,11 @@ template <typename T>
 class Deinterleaver : public DataStream<T>
 {
 public:
-	Deinterleaver(DataChannel<T> dataChannel, size_t start, size_t inc)
+	Deinterleaver(const DataChannel<T>& dataChannel, size_t start, size_t inc)
 		: dataChannel(dataChannel), start(start), inc(inc)
 	{ }
 
-	std::vector<T>& getData(int channel) override
+	const std::vector<T>& getData(int channel) override
 	{
 		auto& data = dataChannel.stream->getData(dataChannel.channel);
 
@@ -332,12 +332,12 @@ template <typename T>
 class Splitter : public DataStream<T>
 {
 public:
-	Splitter(DataChannel<T> dataChannel, int channels)
+	Splitter(const DataChannel<T>& dataChannel, int channels)
 		: dataChannel(dataChannel),
 		  channelPositions(channels), channels(channels)
 	{ }
 
-	std::vector<T>& getData(int channel) override
+	const std::vector<T>& getData(int channel) override
 	{
 		size_t minPos = *std::min_element(channelPositions.begin(), channelPositions.end());
 		if (minPos > 0)
@@ -364,7 +364,7 @@ public:
 	}
 
 private:
-	std::vector<T> getNewVector(std::vector<T>& original)
+	std::vector<T> getNewVector(const std::vector<T>& original)
 	{
 		auto newVector = pool.get();
 		newVector.clear();
@@ -384,11 +384,11 @@ template <typename T>
 class StreamInterleaver : public DataStream<T>
 {
 public:
-	StreamInterleaver(DataChannel<T> dataChannel, int channels)
+	StreamInterleaver(const DataChannel<T>& dataChannel, int channels)
 		: dataChannel(dataChannel), bufqueues(channels), bufs(channels)
 	{ }
 
-	std::vector<T>& getData(int channel) override
+	const std::vector<T>& getData(int channel) override
 	{
 		auto& queue = bufqueues[channel];
 
@@ -430,12 +430,12 @@ template <typename T>
 class Chopper : public DataStream<T>
 {
 public:
-	Chopper(DataChannel<T> dataChannel,
+	Chopper(const DataChannel<T>& dataChannel,
 			double onTime, double offTime)
 		: dataChannel(dataChannel), t(0), onTime(onTime), period(onTime + offTime)
 	{ }
 
-	std::vector<T>& getData(int channel) override
+	const std::vector<T>& getData(int channel) override
 	{
 		auto& data = dataChannel.stream->getData(dataChannel.channel);
 
@@ -467,11 +467,11 @@ template <typename T>
 class Transformer : public DataStream<T>
 {
 public:
-	Transformer(DataChannel<T> dataChannel)
+	Transformer(const DataChannel<T>& dataChannel)
 		: dataChannel(dataChannel)
 	{ }
 
-	std::vector<T>& getData(int channel) override
+	const std::vector<T>& getData(int channel) override
 	{
 		auto& data = dataChannel.stream->getData(dataChannel.channel);
 
@@ -484,7 +484,7 @@ public:
 	}
 
 protected:
-	virtual T transform(const T& x) = 0;
+	virtual T transform(T x) = 0;
 
 private:
 	std::vector<T> buf;
@@ -495,15 +495,15 @@ template <typename T>
 class Gain : public Transformer<T>
 {
 public:
-	Gain(DataChannel<T> dataChannel, T gain)
+	Gain(const DataChannel<T>& dataChannel, T gain)
 		: Transformer<T>(dataChannel), gain(gain)
 	{ }
 
-	void setGain(const T& gain) { this->gain = gain; }
-	T getGain(const T& gain) const { return gain; }
+	void setGain(T gain) { this->gain = gain; }
+	T getGain(T gain) const { return gain; }
 
 protected:
-	T transform(const T& x) override { return gain * x; }
+	T transform(T x) override { return gain * x; }
 
 private:
 	T gain;
@@ -513,15 +513,15 @@ template <typename T>
 class Adder : public Transformer<T>
 {
 public:
-	Adder(DataChannel<T> dataChannel, T offset)
+	Adder(const DataChannel<T>& dataChannel, T offset)
 		: Transformer<T>(dataChannel), offset(offset)
 	{ }
 
-	void setOffset(const T& offset) { this->offset = offset; }
-	T getOffset(const T& offset) const { return offset; }
+	void setOffset(T offset) { this->offset = offset; }
+	T getOffset(T offset) const { return offset; }
 
 protected:
-	T transform(const T& x) override { return offset + x; }
+	T transform(T x) override { return offset + x; }
 
 private:
 	T offset;
@@ -531,13 +531,13 @@ template <typename T>
 class FirFilter : public DataStream<T>
 {
 public:
-	FirFilter(DataChannel<T> dataChannel,
+	FirFilter(const DataChannel<T>& dataChannel,
 			std::shared_ptr<std::vector<T>> coefficients)
 		: dataChannel(dataChannel),
 		  coefficients(coefficients), first(true)
 	{ }
 
-	std::vector<T>& getData(int channel) override
+	const std::vector<T>& getData(int channel) override
 	{
 		auto& data = dataChannel.stream->getData(dataChannel.channel);
 
@@ -588,7 +588,7 @@ public:
 		: dataChannels(dataChannels), combiner(combiner)
 	{ }
 
-	std::vector<T>& getData(int channel) override
+	const std::vector<T>& getData(int channel) override
 	{
 		buf.clear();
 
@@ -642,7 +642,7 @@ template <typename T>
 class AlsaMonoSink
 {
 public:
-	AlsaMonoSink(DataChannel<T> dataChannel)
+	AlsaMonoSink(const DataChannel<T>& dataChannel)
 		: dataChannel(dataChannel),
 		  alsa(1, 48000, 500000)
 	{ }
@@ -661,7 +661,7 @@ template <typename T>
 class AlsaStereoSink
 {
 public:
-	AlsaStereoSink(DataChannel<T> dataChannelLeft, DataChannel<T> dataChannelRight)
+	AlsaStereoSink(const DataChannel<T>& dataChannelLeft, DataChannel<T> dataChannelRight)
 		: dataChannelLeft(dataChannelLeft), dataChannelRight(dataChannelRight),
 		  alsa(2, 48000, 500000)
 	{ }
@@ -698,11 +698,11 @@ template <typename T>
 class DelayLine : public DataStream<T>
 {
 public:
-	DelayLine(DataChannel<T> dataChannel, size_t delay)
+	DelayLine(const DataChannel<T>& dataChannel, size_t delay)
 	: dataChannel(dataChannel), buf(delay), first(true)
 	{ }
 
-	std::vector<T>& getData(int channel) override
+	const std::vector<T>& getData(int channel) override
 	{
 		if (first)
 		{
@@ -727,11 +727,11 @@ template <typename T>
 class DataBuffer : public DataStream<T>
 {
 public:
-	DataBuffer(DataChannel<T> dataChannel, size_t len)
+	DataBuffer(const DataChannel<T>& dataChannel, size_t len)
 	: dataChannel(dataChannel), buf(len), len(len)
 	{ }
 
-	std::vector<T>& getData(int channel) override
+	const std::vector<T>& getData(int channel) override
 	{
 		// XXX: Replace this with a circular buffer
 		while (tmpBuf.size() < buf.size())
