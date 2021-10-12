@@ -381,6 +381,52 @@ private:
 };
 
 template <typename T>
+class StreamInterleaver : public DataStream<T>
+{
+public:
+	StreamInterleaver(DataChannel<T> dataChannel, int channels)
+		: dataChannel(dataChannel), bufqueues(channels), bufs(channels)
+	{ }
+
+	std::vector<T>& getData(int channel) override
+	{
+		auto& queue = bufqueues[channel];
+
+		if (queue.empty())
+		{
+			auto& data = dataChannel.stream->getData(dataChannel.channel);
+
+			for (size_t i = 0; i < bufqueues.size(); i++)
+			{
+				auto newVector = pool.get();
+				newVector.clear();
+
+				for (size_t j = i; j < data.size(); j += bufqueues.size())
+				{
+					newVector.push_back(data[j]);
+				}
+
+				bufqueues[i].push_back(std::move(newVector));
+			}
+		}
+
+		pool.giveBack(std::move(bufs[channel]));
+
+		bufs[channel] = std::move(queue.front());
+
+		queue.pop_front();
+
+		return bufs[channel];
+	}
+
+private:
+	DataChannel<T> dataChannel;
+	std::vector<std::deque<std::vector<T>>> bufqueues;
+	std::vector<std::vector<T>> bufs;
+	SharedPool<std::vector<T>> pool;
+};
+
+template <typename T>
 class Chopper : public DataStream<T>
 {
 public:
@@ -769,12 +815,10 @@ int main()
 	auto converter = std::make_shared<DataStreamConverter<signalType, int16_t>>(fileReader,
 			[] (int16_t x) { return (float) x / 32768.0f; });
 
-	auto fileSplitter = std::make_shared<Splitter<signalType>>(DataChannel<signalType>{converter, 0}, 2);
+	auto deinterleaved = std::make_shared<StreamInterleaver<signalType>>(
+			DataChannel<signalType> {converter, 0}, 2);
 
-	auto left = std::make_shared<Deinterleaver<signalType>>(DataChannel<signalType>{fileSplitter, 0}, 0, 2);
-	auto right = std::make_shared<Deinterleaver<signalType>>(DataChannel<signalType>{fileSplitter, 1}, 1, 2);
-
-	AlsaStereoSink<signalType> s({left, 0}, {right, 1});
+	AlsaStereoSink<signalType> s({deinterleaved, 0}, {deinterleaved, 1});
 	//AlsaMonoSink<signalType> s({right, 0});
 
 	while (true)
