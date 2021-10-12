@@ -818,7 +818,17 @@ int main()
 	auto deinterleaved = std::make_shared<StreamInterleaver<signalType>>(
 			DataChannel<signalType> {converter, 0}, 2);
 
-	AlsaStereoSink<signalType> s({deinterleaved, 0}, {deinterleaved, 1});
+	auto splitLeft = std::make_shared<Splitter<signalType>>(DataChannel<signalType>{deinterleaved, 0}, 2);
+	auto delayedLeft = std::make_shared<DelayLine<signalType>>(DataChannel<signalType>{splitLeft, 0}, 48000 / 8);
+	auto bufferedLeft = std::make_shared<DataBuffer<signalType>>(DataChannel<signalType>{delayedLeft, 0}, 1024);
+	auto attenLeft = std::make_shared<Gain<signalType>>(DataChannel<signalType>{bufferedLeft, 0}, .25);
+
+	auto echoLeft = std::make_shared<Mixer<signalType>>(
+			std::initializer_list<DataChannel<signalType>>(
+					{{splitLeft, 1}, {attenLeft, 0}}));
+
+
+	AlsaStereoSink<signalType> s({echoLeft, 0}, {deinterleaved, 1});
 	//AlsaMonoSink<signalType> s({right, 0});
 
 	while (true)
@@ -827,6 +837,7 @@ int main()
 	}
 
 	return 0;
+#if 0
 #if 1
 	auto tone1 = shittyTone(125.0 / 2, 0.2, .1, 0.2);
 	auto tone2 = shittyTone(125.0 / 4, 0.3, .3, 0.2);
@@ -989,4 +1000,5 @@ int main()
 	std::cout << "Done\n";
 
 	return 0;
+#endif
 }
