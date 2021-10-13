@@ -528,6 +528,34 @@ private:
 };
 
 template <typename T>
+class Clip : public Transformer<T>
+{
+public:
+	Clip(const DataChannel<T>& dataChannel, T lower, T upper)
+		: Transformer<T>(dataChannel), lower(lower), upper(upper)
+	{ }
+
+	void setLower(T lower) { this->lower = lower; }
+	T getLower(T gain) const { return lower; }
+
+	void setUpper(T upper) { this->gain = upper; }
+	T getUpper(T upper) const { return upper; }
+
+protected:
+	T transform(T x) override
+	{
+		if (x < lower) x = lower;
+		if (x > upper) x = upper;
+		return x;
+	}
+
+private:
+	T lower;
+	T upper;
+};
+
+
+template <typename T>
 class FirFilter : public DataStream<T>
 {
 public:
@@ -840,12 +868,18 @@ int main()
 	auto bassBuffered = std::make_shared<DataBuffer<signalType>>(DataChannel<signalType>{bass, 0}, 1024);
 	auto trebleBuffered = std::make_shared<DataBuffer<signalType>>(DataChannel<signalType>{treble, 0}, 1024);
 
-	auto bassGain = std::make_shared<Gain<signalType>>(DataChannel<signalType>{bassBuffered, 0}, -1);
-	auto trebleGain = std::make_shared<Gain<signalType>>(DataChannel<signalType>{trebleBuffered, 0}, 4);
+	//auto bassClipper = std::make_shared<Clip<signalType>>(DataChannel<signalType>{bassBuffered, 0}, -.1, .1);
+	auto bassClipper = std::make_shared<Clip<signalType>>(DataChannel<signalType>{bassBuffered, 0}, -1, 1);
+
+	auto bassGain = std::make_shared<Gain<signalType>>(DataChannel<signalType>{bassClipper, 0}, 1);
+	auto trebleGain = std::make_shared<Gain<signalType>>(DataChannel<signalType>{trebleBuffered, 0}, 10);
 
 	auto eq = std::make_shared<Mixer<signalType>>(
-			std::initializer_list<DataChannel<signalType>>(
-					{{bassGain, 0}, {trebleGain, 0}, {splitRight, 2}}));
+			std::initializer_list<DataChannel<signalType>>({
+				{bassGain, 0},
+				{trebleGain, 0},
+				{splitRight, 2}
+				}));
 
 
 	AlsaStereoSink<signalType> s({echoLeft, 0}, {eq, 0});
