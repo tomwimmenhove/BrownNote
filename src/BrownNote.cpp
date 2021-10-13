@@ -806,6 +806,8 @@ std::vector<T> readFileIntoVector(std::string filename)
 	return res;
 }
 
+#include "firs.h"
+
 int main()
 {
 	std::string filename = "/home/tom/git/BrownNote/file.raw";
@@ -827,8 +829,26 @@ int main()
 			std::initializer_list<DataChannel<signalType>>(
 					{{splitLeft, 1}, {attenLeft, 0}}));
 
+	auto coeffs_bass = std::make_shared<std::vector<signalType>>(filter_taps_bass, filter_taps_bass + FILTER_TAP_NUM_BASS);
+	auto coeffs_treble = std::make_shared<std::vector<signalType>>(filter_taps_treble, filter_taps_treble + FILTER_TAP_NUM_TREBLE);
+	
+	auto splitRight = std::make_shared<Splitter<signalType>>(DataChannel<signalType>{deinterleaved, 1}, 3);
 
-	AlsaStereoSink<signalType> s({echoLeft, 0}, {deinterleaved, 1});
+	auto bass = std::make_shared<FirFilter<signalType>>(DataChannel<signalType>{splitRight, 0}, coeffs_bass);
+	auto treble = std::make_shared<FirFilter<signalType>>(DataChannel<signalType>{splitRight, 1}, coeffs_treble);
+
+	auto bassBuffered = std::make_shared<DataBuffer<signalType>>(DataChannel<signalType>{bass, 0}, 1024);
+	auto trebleBuffered = std::make_shared<DataBuffer<signalType>>(DataChannel<signalType>{treble, 0}, 1024);
+
+	auto bassGain = std::make_shared<Gain<signalType>>(DataChannel<signalType>{bassBuffered, 0}, -1);
+	auto trebleGain = std::make_shared<Gain<signalType>>(DataChannel<signalType>{trebleBuffered, 0}, 4);
+
+	auto eq = std::make_shared<Mixer<signalType>>(
+			std::initializer_list<DataChannel<signalType>>(
+					{{bassGain, 0}, {trebleGain, 0}, {splitRight, 2}}));
+
+
+	AlsaStereoSink<signalType> s({echoLeft, 0}, {eq, 0});
 	//AlsaMonoSink<signalType> s({right, 0});
 
 	while (true)
@@ -852,6 +872,8 @@ int main()
 
 	auto hisssss =  std::make_shared<NoiseSource<signalType>>(1.0);
 
+	auto combinedTones = std::make_shared<Mixer<signalType>>(
+			std::initializer_list<DataChannel<signalType>>(
 	auto combinedTones = std::make_shared<Mixer<signalType>>(
 			std::initializer_list<DataChannel<signalType>>(
 					{ { tone1, 0 }, { tone2, 0 },
