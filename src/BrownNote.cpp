@@ -561,37 +561,47 @@ class FirFilter : public DataStream<T>
 public:
 	FirFilter(const DataChannel<T>& dataChannel,
 			std::shared_ptr<std::vector<T>> coefficients)
-		: dataChannel(dataChannel),
-		  coefficients(coefficients), first(true)
+		: dataChannel(dataChannel), coefficients(coefficients),
+		  buf(coefficients->size() / 2),
+		  taps(coefficients->size()), curTap(taps.end() - 1)
 	{ }
 
 	const std::vector<T>& getData(int channel) override
 	{
 		auto& data = dataChannel.stream->getData(dataChannel.channel);
 
-		buf.clear();
-		if (first)
+		/* Clear the buffer, unless it's the first run (in which
+		 * case the buffer contains nDelay number of silent samples) */
+		if (filled || curTap != taps.end() - 1)
 		{
-			buf.resize(coefficients->size() / 2);
-			first = false;
+			buf.clear();
 		}
 
 		for(auto& x: data)
 		{
-			taps.push_front(x);
-			if (taps.size() == coefficients->size())
+			*curTap = x;
+
+			typename std::vector<T>::iterator tap = curTap;
+			if (curTap-- == taps.begin())
+			{
+				curTap = taps.end();
+				filled = true;
+			}
+
+			if (filled)
 			{
 				T sum = 0;
-				typename std::list<T>::iterator t;
-				typename std::vector<T>::iterator c;
-				for(c  = coefficients->begin(), t  = taps.begin();
-					c != coefficients->end(),   t != taps.end();
-						++c, ++t)
+
+				for (typename std::vector<T>::iterator coeff = coefficients->begin();
+					coeff != coefficients->end(); ++coeff, ++tap)
 				{
-					sum += (*c) * (*t);
+					if (tap == taps.end())
+					{
+						tap = taps.begin();
+					}
+					sum += (*coeff) * (*tap);
 				}
 
-				taps.pop_back();
 				buf.push_back(sum);
 			}
 		}
@@ -603,8 +613,9 @@ private:
 	DataChannel<T> dataChannel;
 	std::shared_ptr<std::vector<T>> coefficients;
 	std::vector<T> buf;
-	std::list<T> taps;
-	bool first;
+	std::vector<T> taps;
+	typename std::vector<T>::iterator curTap;
+	int filled;
 };
 
 template <typename T, typename U>
@@ -872,7 +883,7 @@ int main()
 	auto bassClipper = std::make_shared<Clip<signalType>>(DataChannel<signalType>{bassBuffered, 0}, -1, 1);
 
 	auto bassGain = std::make_shared<Gain<signalType>>(DataChannel<signalType>{bassClipper, 0}, 1);
-	auto trebleGain = std::make_shared<Gain<signalType>>(DataChannel<signalType>{trebleBuffered, 0}, 10);
+	auto trebleGain = std::make_shared<Gain<signalType>>(DataChannel<signalType>{trebleBuffered, 0}, 1);
 
 	auto eq = std::make_shared<Mixer<signalType>>(
 			std::initializer_list<DataChannel<signalType>>({
