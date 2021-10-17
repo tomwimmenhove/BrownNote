@@ -359,7 +359,8 @@ public:
 			}
 
 			pool.giveBack(std::move(bufs.front()));
-			bufs.pop_front();
+			//bufs.pop_front();
+			bufs.erase(bufs.begin());
 		}
 
 		size_t channelPos = channelPositions[channel]++;
@@ -384,7 +385,8 @@ private:
 		return newVector;
 	}
 
-	std::deque<std::vector<T>> bufs;
+	//std::deque<std::vector<T>> bufs;
+	std::vector<std::vector<T>> bufs;
 	DataChannel<T> dataChannel;
 	std::vector<size_t> channelPositions;
 	int channels;
@@ -425,14 +427,16 @@ public:
 
 		bufs[channel] = std::move(queue.front());
 
-		queue.pop_front();
+		//queue.pop_front();
+		queue.erase(queue.begin());
 
 		return bufs[channel];
 	}
 
 private:
 	DataChannel<T> dataChannel;
-	std::vector<std::deque<std::vector<T>>> bufqueues;
+	//std::vector<std::deque<std::vector<T>>> bufqueues;
+	std::vector<std::vector<std::vector<T>>> bufqueues;
 	std::vector<std::vector<T>> bufs;
 	SharedPool<std::vector<T>> pool;
 };
