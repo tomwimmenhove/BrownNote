@@ -23,6 +23,17 @@
 
 #include "alsa.h"
 
+int numOfHeapAllocations = 0;
+
+void* operator new(size_t size)
+{
+    numOfHeapAllocations++;
+
+	std::cout << "Heap allocation #" << numOfHeapAllocations << " of size " << size << '\n';
+
+    return malloc(size);
+}
+
 typedef float signalType;
 
 template <typename T>
@@ -53,19 +64,19 @@ public:
 			return T();
 		}
 
-		auto res = std::move(pool.front());
-		pool.pop_front();
+		auto res = std::move(pool.back());
+		pool.pop_back();
 
 		return res;
 	}
 
-	void giveBack(const T&& x)
+	void giveBack(T&& x)
 	{
-		pool.push_back(std::move(x));
+		pool.emplace_back(std::move(x));
 	}
 
 private:
-	std::deque<T> pool;
+	std::vector<T> pool;
 };
 
 template <typename T>
@@ -381,10 +392,10 @@ private:
 };
 
 template <typename T>
-class StreamInterleaver : public DataStream<T>
+class StreamDeinterleaver : public DataStream<T>
 {
 public:
-	StreamInterleaver(const DataChannel<T>& dataChannel, int channels)
+	StreamDeinterleaver(const DataChannel<T>& dataChannel, int channels)
 		: dataChannel(dataChannel), bufqueues(channels), bufs(channels)
 	{ }
 
@@ -639,6 +650,7 @@ public:
 		}
 
 		auto& data0 = dataChannels[0].stream->getData(dataChannels[0].channel);
+
 		buf.insert(buf.end(), data0.begin(), data0.end());
 
 		for(auto it = dataChannels.begin() + 1; it < dataChannels.end(); it++)
@@ -856,7 +868,7 @@ int main()
 	auto converter = std::make_shared<DataStreamConverter<signalType, int16_t>>(fileReader,
 			[] (int16_t x) { return (float) x / 32768.0f; });
 
-	auto deinterleaved = std::make_shared<StreamInterleaver<signalType>>(
+	auto deinterleaved = std::make_shared<StreamDeinterleaver<signalType>>(
 			DataChannel<signalType> {converter, 0}, 2);
 
 	auto splitLeft = std::make_shared<Splitter<signalType>>(DataChannel<signalType>{deinterleaved, 0}, 2);
